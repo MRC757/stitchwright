@@ -247,3 +247,18 @@ def test_cli_path_refuses_or_shrinks_stitches_past_the_area(tmp_path):
     rep = convert(str(p), out, satins={"b": 3.0}, fit=True)
     assert rep.width_mm <= 96.1
     assert rep.bounds_mm[2] - rep.bounds_mm[0] <= 96.1
+
+
+def test_choices_and_the_old_keywords_give_the_same_plan():
+    from svg2pes.convert import Choices
+    from svg2pes.fill import FillSpec
+    d = load_svg(SAMPLE)
+    c = Choices(overrides={"sun": "Red"}, skip=["wave"], fills={"star": None},
+                satins={"badge": 2.0}, fill_spec=FillSpec(angle=30))
+    new = plan_design(d, c).report
+    old = plan_design(d, overrides={"sun": "Red"}, skip=["wave"], fills={"star": None},
+                      satins={"badge": 2.0}, fill_spec=FillSpec(angle=30)).report
+    assert (new.stitch_count, new.color_blocks) == (old.stitch_count, old.color_blocks)
+    assert c.overrides == {"sun": "Red"}                      # the caller's Choices is not changed
+    with pytest.raises(TypeError, match="overides"):
+        plan_design(d, overides={"sun": "Red"})               # a typo is still an error

@@ -77,14 +77,45 @@ def format_minutes(m: float) -> str:
     return f"{h} h {mm} min" if h else f"{mm} min"
 
 
-def apply_color_choices(design: Design, overrides: dict[str, str] | None,
-                        color_map: dict[str, str] | None, skip: list[str] | None,
-                        fills: dict[str, str | None] | None = None,
-                        no_outline: list[str] | None = None,
-                        fill_spec: FillSpec | None = None,
-                        satins: dict[str, float] | None = None) -> None:
-    """Apply the operator's colour picks. Per-object overrides beat source-colour maps.
-    fills maps an object to its fill colour (None = the object's own thread)."""
+@dataclass
+class Choices:
+    """The operator's per-object choices, by object id (or number from `list`).
+    Colours are text: '#rrggbb', a chart name, 'brother:<n>' or 'chart:<row>'."""
+    overrides: dict[str, str] = field(default_factory=dict)      # object -> thread colour
+    color_map: dict[str, str] = field(default_factory=dict)      # SVG colour -> thread colour
+    skip: list[str] = field(default_factory=list)                # objects left out
+    fills: dict[str, str | None] = field(default_factory=dict)   # object -> fill colour (None: own)
+    no_outline: list[str] = field(default_factory=list)          # objects sewn without outline
+    satins: dict[str, float] = field(default_factory=dict)       # object -> satin width (mm)
+    fill_spec: FillSpec = field(default_factory=FillSpec)        # angle, density, ... for fills
+
+
+def _choices(choices: Choices | None, **legacy) -> Choices:
+    """A Choices, with the old separate keyword arguments (still accepted) folded in."""
+    c = copy.deepcopy(choices) if choices is not None else Choices()
+    for key, value in legacy.items():
+        if value is not None:
+            setattr(c, key, value)
+    return c
+
+
+_LEGACY = {"overrides", "color_map", "skip", "fills", "no_outline", "satins", "fill_spec"}
+
+
+def _legacy(kwargs: dict) -> dict:
+    """The old per-object keyword arguments (overrides=, fills=, ...), checked."""
+    unknown = set(kwargs) - _LEGACY
+    if unknown:
+        raise TypeError(f"unexpected keyword argument(s): {', '.join(sorted(unknown))}")
+    return kwargs
+
+
+def apply_color_choices(design: Design, choices: Choices) -> None:
+    """Apply the operator's choices to the design's objects. Per-object colour
+    overrides beat source-colour maps."""
+    overrides, color_map, skip = choices.overrides, choices.color_map, choices.skip
+    fills, no_outline, fill_spec, satins = (choices.fills, choices.no_outline,
+                                            choices.fill_spec, choices.satins)
     by_id = {o.obj_id: o for o in design.objects}
     by_index = {str(o.index): o for o in design.objects}
 
@@ -226,10 +257,7 @@ class Plan:
     report: Report      # out_path is empty until the plan is written
 
 
-def plan_design(design: Design, *,
-                overrides: dict[str, str] | None = None,
-                color_map: dict[str, str] | None = None,
-                skip: list[str] | None = None,
+def plan_design(design: Design, choices: Choices | None = None, *,
                 width_mm: float | None = None,
                 fit: bool = False,
                 hoop_mm: tuple[float, float] = (100.0, 100.0),
@@ -237,11 +265,8 @@ def plan_design(design: Design, *,
                 settings: Settings | None = None,
                 snap: bool = True,
                 placed: bool = False,
-                fills: dict[str, str | None] | None = None,
-                no_outline: list[str] | None = None,
-                fill_spec: FillSpec | None = None,
-                satins: dict[str, float] | None = None,
-                _attempt: int = 0) -> Plan:
+                _attempt: int = 0,
+                **legacy) -> Plan:
     """Turn a loaded design into stitches without writing anything.
     The design passed in is not modified.
 
@@ -251,9 +276,10 @@ def plan_design(design: Design, *,
     with outside_hoop()."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
+    choices = _choices(choices, **_legacy(legacy))
     original = design
     design = copy.deepcopy(design)
-    apply_color_choices(design, overrides, color_map, skip, fills, no_outline, fill_spec, satins)
+    apply_color_choices(design, choices)
     if not design.active():
         raise ConversionError("Nothing to stitch: " + "; ".join(design.warnings or ["all objects skipped"]))
     warnings = list(design.warnings)
@@ -320,11 +346,9 @@ def plan_design(design: Design, *,
             sw, sh = bx1 - bx0, by1 - by0
             aw, ah = (hoop_mm[0] - 2 * margin_mm) * 10, (hoop_mm[1] - 2 * margin_mm) * 10
             r = min(aw / sw if sw else 1.0, ah / sh if sh else 1.0) * 0.995
-            return plan_design(original, overrides=overrides, color_map=color_map, skip=skip,
-                               width_mm=w * scale * r, fit=True, hoop_mm=hoop_mm,
-                               margin_mm=margin_mm, settings=settings, snap=snap,
-                               fills=fills, no_outline=no_outline, fill_spec=fill_spec,
-                               satins=satins, _attempt=_attempt + 1)
+            return plan_design(original, choices, width_mm=w * scale * r, fit=True,
+                               hoop_mm=hoop_mm, margin_mm=margin_mm, settings=settings,
+                               snap=snap, _attempt=_attempt + 1)
         x0, y0, x1, y1 = report.bounds_mm
         raise ConversionError(
             f"The stitches reach {x1 - x0:.1f} x {y1 - y0:.1f} mm (satin and fill edges go a "
@@ -424,10 +448,7 @@ def write_pes_file(plan: Plan, out_path: str, pes_version: int = 1) -> Report:
     return dataclasses.replace(plan.report, out_path=out_path)
 
 
-def convert(svg_path: str, out_path: str, *,
-            overrides: dict[str, str] | None = None,
-            color_map: dict[str, str] | None = None,
-            skip: list[str] | None = None,
+def convert(svg_path: str, out_path: str, choices: Choices | None = None, *,
             width_mm: float | None = None,
             fit: bool = False,
             hoop_mm: tuple[float, float] = (100.0, 100.0),
@@ -436,11 +457,8 @@ def convert(svg_path: str, out_path: str, *,
             pes_version: int = 1,
             snap: bool = True,
             preview_path: str | None = None,
-            fills: dict[str, str | None] | None = None,
-            no_outline: list[str] | None = None,
-            fill_spec: FillSpec | None = None,
-            satins: dict[str, float] | None = None,
-            svg_dpi: float | None = None) -> Report:
+            svg_dpi: float | None = None,
+            **legacy) -> Report:
     """Load an SVG, plan it and write a PES file (what the CLI uses)."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
@@ -448,10 +466,8 @@ def convert(svg_path: str, out_path: str, *,
     if svg_dpi:                       # e.g. 72 for Illustrator exports: SVG assumes 96
         _scale_design(design, 96.0 / svg_dpi)
         design.warnings = [w for w in design.warnings if "72 dpi" not in w]
-    plan = plan_design(design, overrides=overrides, color_map=color_map, skip=skip,
-                       width_mm=width_mm, fit=fit, hoop_mm=hoop_mm, margin_mm=margin_mm,
-                       settings=s, snap=snap, fills=fills, no_outline=no_outline,
-                       fill_spec=fill_spec, satins=satins)
+    plan = plan_design(design, _choices(choices, **_legacy(legacy)), width_mm=width_mm,
+                       fit=fit, hoop_mm=hoop_mm, margin_mm=margin_mm, settings=s, snap=snap)
     report = write_pes_file(plan, out_path, pes_version)
     if preview_path:
         render_preview(plan.pattern, preview_path, hoop_mm)

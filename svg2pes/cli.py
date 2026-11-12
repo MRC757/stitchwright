@@ -4,7 +4,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .convert import ConversionError, Settings, convert, describe_objects, format_minutes
+from .convert import (Choices, ConversionError, Settings, convert, describe_objects,
+                      format_minutes)
 from .fill import FillSpec
 from .palette import brother_threads, to_hex
 from .svg_import import load_svg
@@ -118,17 +119,19 @@ def main(argv: list[str] | None = None) -> int:
                 print("warning:", w)
             return 0
 
+        choices = Choices(
+            overrides=_pairs(a.set, "--set"), color_map=_pairs(a.map, "--map"),
+            skip=a.skip or [], fills=_fills(a.fill), no_outline=a.no_outline or [],
+            satins=_satins(a.satin),
+            fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch,
+                               underlay=not a.no_underlay, pull_comp=a.pull_comp))
         rep = convert(
-            a.svg, a.out,
-            overrides=_pairs(a.set, "--set"), color_map=_pairs(a.map, "--map"), skip=a.skip,
+            a.svg, a.out, choices,
             width_mm=a.width, fit=a.fit, hoop_mm=a.hoop, margin_mm=a.margin,
             settings=Settings(stitch_len=a.stitch_len, keep_order=a.keep_order,
                               knockout=not a.no_cutout, machine_spm=a.speed),
             pes_version=a.pes_version, snap=not a.no_snap, preview_path=a.preview,
-            fills=_fills(a.fill), no_outline=a.no_outline,
-            fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch,
-                               underlay=not a.no_underlay, pull_comp=a.pull_comp),
-            satins=_satins(a.satin), svg_dpi=a.svg_dpi)
+            svg_dpi=a.svg_dpi)
     except OSError as e:
         print(f"error: {e.strerror or e}: {e.filename or ''}".rstrip(": "), file=sys.stderr)
         return 2
