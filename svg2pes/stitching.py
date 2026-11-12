@@ -175,7 +175,7 @@ def _overlap(a, b) -> bool:
 
 
 def _fill_runs(obj: DesignObject, s: Settings, cutouts=None) -> list[Run]:
-    paths = fill_paths(obj.polylines, obj.fill, s.min_stitch, cutouts)
+    paths = fill_paths(obj.polylines, obj.fill, s.min_stitch, cutouts, hidden=obj.outline)
     return [Run(p, False, obj.obj_id, kind="fill") for p in paths if len(p) >= 2]
 
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .geometry import drop_close, subdivide
+from .geometry import drop_close, point_in_polygon, subdivide
 
 Point = tuple[float, float]
 RGB = tuple[int, int, int]
@@ -259,11 +259,16 @@ def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0) -> list[list
 
 
 # --------------------------------------------------------------------- public
+TRAVEL_INSET_MM = 0.3   # travel stitches sit this far inside a fill that has no outline
+
+
 def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
-               cutouts=None) -> list[list[Point]]:
+               cutouts=None, hidden: bool = True) -> list[list[Point]]:
     """Needle-point paths that fill the closed outlines in `polylines` (mm):
     underlay first (if any), then the top fill, joined by travel where possible.
-    cutouts: for each filled shape stacked above, its rings (areas left out)."""
+    cutouts: for each filled shape stacked above, its rings (areas left out).
+    hidden: an outline will be sewn on top, covering travel stitches along the edge;
+    if not, travel runs a little inside the fill instead, where the fill covers it."""
     rings = closed_rings(polylines)
     if not rings or spec.spacing <= 0 or spec.stitch_len <= 0:
         return []
@@ -273,7 +278,42 @@ def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
         paths += _unrotate(_serpentine(rows, min(3.0, spec.stitch_len), min_len, stagger=False), cs)
     rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp)
     paths += _unrotate(_serpentine(rows, spec.stitch_len, min_len), cs)
-    return travel_join(paths, rings, L=2.5)
+    travel = rings if hidden else [inset_ring(r, rings, TRAVEL_INSET_MM) for r in rings]
+    return travel_join(paths, travel, L=2.5)
+
+
+def _inside_fill(p, rings) -> bool:
+    """Even-odd: is p inside the area the rings enclose (holes excluded)?"""
+    return sum(point_in_polygon(p, r) for r in rings) % 2 == 1
+
+
+def inset_ring(ring, rings, dist: float) -> list[Point]:
+    """The ring moved dist mm into the filled area (outer edges move in, holes grow).
+    Each corner moves to where its two edges, each offset by dist, meet (a miter),
+    so the result stays dist from every edge; very sharp corners are capped."""
+    pts = ring[:-1] if ring[0] == ring[-1] else list(ring)
+    n = len(pts)
+    out = []
+    for i, p in enumerate(pts):
+        a, b = pts[i - 1], pts[(i + 1) % n]
+        e1 = (p[0] - a[0], p[1] - a[1])
+        e2 = (b[0] - p[0], b[1] - p[1])
+        l1, l2 = math.hypot(*e1), math.hypot(*e2)
+        if l1 < 1e-12 or l2 < 1e-12:
+            out.append(p)
+            continue
+        n1 = (-e1[1] / l1, e1[0] / l1)                   # left normals of the two edges
+        n2 = (-e2[1] / l2, e2[0] / l2)
+        k = 1 + n1[0] * n2[0] + n1[1] * n2[1]
+        m = ((n1[0] + n2[0]) / k, (n1[1] + n2[1]) / k) if k > 1e-6 else n1
+        mlen = math.hypot(*m)
+        if mlen > 3:                                     # cap the miter at sharp corners
+            m = (m[0] * 3 / mlen, m[1] * 3 / mlen)
+        q = (p[0] + m[0] * dist, p[1] + m[1] * dist)
+        if not _inside_fill(q, rings):
+            q = (p[0] - m[0] * dist, p[1] - m[1] * dist)
+        out.append(q)
+    return out + [out[0]]
 
 
 class _Line:

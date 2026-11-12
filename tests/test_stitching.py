@@ -218,3 +218,27 @@ def test_curves_get_shorter_stitches_straight_runs_do_not():
     assert len(line) - 1 == 20                                  # unchanged
     even = resample(np.array(simplify(circle, 0.05)), 2.5, 35, 0.4, curve_turn_deg=0)
     assert len(even) - 1 < 20                                   # 0 turns the feature off
+
+
+def test_travel_runs_inside_the_fill_when_no_outline_covers_it():
+    from svg2pes.fill import FillSpec, closed_rings, fill_paths
+    from svg2pes.geometry import segment_distance
+    from svg2pes.svg_import import Polyline
+    u = Polyline([(0, 0), (9, 0), (9, 9), (6, 9), (6, 3), (3, 3), (3, 9), (0, 9), (0, 0)], True)
+    ring = closed_rings([u])[0]
+    spec = FillSpec(angle=0, spacing=0.4, underlay=False, pull_comp=0)
+    row_ys = [0.2 + 0.4 * k for k in range(22)]          # rows at y = 0.2 ... 8.6
+
+    def travel_points(paths):
+        """Points that aren't on a fill row: the travel stitches."""
+        return [p for path in paths for p in path
+                if min(abs(p[1] - y) for y in row_ys) > 1e-6]
+
+    def edge_gap(p):
+        return min(segment_distance(p, a, b) for a, b in zip(ring, ring[1:]))
+
+    covered = travel_points(fill_paths([u], spec, hidden=True))
+    assert covered and min(edge_gap(p) for p in covered) < 0.05      # on the edge
+    shown = travel_points(fill_paths([u], spec, hidden=False))
+    assert shown and min(edge_gap(p) for p in shown) >= 0.25         # tucked inside
+    assert len(fill_paths([u], spec, hidden=False)) == 1             # still joined, no jump
