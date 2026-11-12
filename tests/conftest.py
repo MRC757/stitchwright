@@ -1,13 +1,10 @@
 """Shared test fixtures and helpers (import helpers with `from conftest import ...`)."""
 import math
 import os
-import sys
 import tkinter as tk
 
 import pyembroidery
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "samples", "sample.svg")
 RED = (0xED, 0x17, 0x1F)

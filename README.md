@@ -76,8 +76,13 @@ macOS.
 
     git clone https://github.com/MRC757/svg2pes.git
     cd svg2pes
-    pip install -r requirements.txt
-    python -m svg2pes gui                 # or double-click svg2pes_gui.pyw on Windows
+    pip install .
+    svg2pes-gui                           # the window (or double-click svg2pes_gui.pyw)
+    svg2pes --help                        # the command line
+
+For working on the code, install it editable with the test tools:
+`pip install -e ".[dev]"`. Running from the folder without installing also works:
+`pip install -r requirements.txt`, then `python -m svg2pes gui`.
 
 ## Using the window
 
@@ -315,8 +320,11 @@ Finished items are ticked.
 
 ## Tests
 
-    pip install pytest
-    python -m pytest tests
+    pip install -e ".[dev]"
+    python -m pytest
+
+The tests include a pyflakes check (no unused imports or undefined names). A few open a
+small window, so run them in a desktop session.
 
 ## Built with
 

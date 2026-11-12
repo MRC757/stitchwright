@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "svg2pes"
+dynamic = ["version"]
+description = "Turn SVG artwork and pictures into Brother PES embroidery files, with a design window"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "pyembroidery>=1.5",
+    "svgelements>=1.9",
+    "Pillow>=10",
+    "numpy>=1.24",
+    "fonttools>=4.40",
+    "Hershey-Fonts>=2.1",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Artistic Software",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pyflakes"]
+
+[project.scripts]
+svg2pes = "svg2pes.cli:main"
+
+[project.gui-scripts]
+svg2pes-gui = "svg2pes.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/MRC757/svg2pes"
+
+[tool.setuptools]
+packages = ["svg2pes"]
+
+[tool.setuptools.dynamic]
+version = { attr = "svg2pes.__version__" }
+
+[tool.setuptools.package-data]
+svg2pes = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

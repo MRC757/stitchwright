@@ -1,9 +1,4 @@
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from svg2pes.log import RepeatGuard, log, setup_logging  # noqa: E402
+from svg2pes.log import RepeatGuard, log, setup_logging
 
 
 def test_setup_logging_writes_to_the_given_folder(tmp_path):
