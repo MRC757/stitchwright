@@ -1,47 +1,66 @@
 # svg2pes
 
-Turn simple SVG artwork into Brother **.PES** embroidery files, with a desktop window for
-choosing thread colours and previewing the stitches.
+Turn artwork into Brother **.PES** embroidery files, with a desktop window for arranging the
+design, choosing threads, filling shapes, lettering and previewing the stitches.
 
-Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Outlines are sewn as
-run stitches, and closed shapes can be filled with fill (tatami) stitches. Satin stitch is
-not built yet.
+Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). It reads SVG artwork,
+pictures (PNG/JPEG) and existing embroidery files. It sews run-stitch outlines, satin columns
+and filled areas (tatami fill with underlay).
 
 ![svg2pes window](docs/screenshot.png)
 
 ## Features
 
-- Reads SVG shapes (rect, circle, ellipse, polygon, polyline, path), including transforms
-  and viewBox units, at their real size in millimetres.
-- Gives each object a thread from Brother's 61-colour thread chart (the *Color Thread
-  Conversion Chart* in the machine manual). The machine shows the right colour name and
-  thread number on screen.
+**Artwork in**
+- SVG shapes (rect, circle, ellipse, polygon, polyline, path) with transforms and viewBox
+  units, at their real size in millimetres. SVG `<text>` is stitched with the matching
+  installed font.
+- Pictures (PNG, JPEG, BMP, GIF), reduced to a few thread colours and traced into shapes.
+- Existing embroidery files (PES, DST, JEF, EXP, VP3), to view, simulate, move and recolour.
+- Illustrator's 72 dpi SVG exports are recognised and can be scaled to their intended size.
+
+**Threads**
+- Brother's 61-colour thread chart (the *Color Thread Conversion Chart* in the machine
+  manual). The machine shows the right colour name and thread number on screen.
 - Colours that come out as the same thread are sewn together, so the machine never stops
   twice for the same spool.
-- Orders the outlines to keep jumps short. Each outline gets tie-in and tie-off stitches,
-  and no stitch is shorter than 0.4 mm (very short stitches tend to break the thread).
-- Lets you move, resize and rotate objects in the hoop, by dragging in the preview or by
-  typing sizes, positions and angles. Undo and redo are included.
-- Fills closed shapes with fill stitches (tatami) at the angle and density you choose, in the
-  outline's thread or another one. Fills are sewn before outlines, so the outlines cover the
-  fill's edges.
-- Adds text in any installed font, sewn as letter outlines (or filled).
-- Shows the real stitches: zoom in to see each stitch and needle point, or watch a sew-out
-  simulation that stitches the design in machine order and stops at each colour change.
-- Checks that everything fits inside the hoop and its margin, and checks each saved file by
-  reading it back.
-- Comes with a desktop window (also as a single Windows `.exe`) and a command line. Both use
-  the same conversion code.
 
-See [Future features](#future-features) for what is planned next.
+**Stitches**
+- Run-stitch outlines with tie-in and tie-off stitches, and no stitch shorter than 0.4 mm.
+- Satin columns for borders, of any width from 0.5 to 8 mm, with a centre-walk underlay.
+- Fill (tatami) for closed shapes:
+  - you choose the angle, density and stitch length
+  - underlay and pull compensation help it lie flat
+  - fill hidden under shapes stacked on top is cut out
+  - separate pieces are joined by travel stitches instead of jumps
+- Fills are sewn before outlines. You can reorder the colour stops yourself.
+- A sewing-time estimate for the whole design and for each colour stop.
+
+**Designing**
+- Move, resize, rotate, flip, align and space objects, by dragging in the preview or by
+  typing numbers.
+- Copy, paste, duplicate, delete, group and ungroup, with undo and redo for everything.
+- Text in any installed font, or in built-in single-line fonts that stay clean at small
+  sizes. Text can be bent along an arc or laid out as a three-letter monogram.
+- Project files (`.svg2pes`) save the whole layout so you can come back to it.
+- Hoop presets and a millimetres/inches switch.
+
+**Checking**
+- A zoomable stitch preview showing each stitch and needle point, and a sew-out simulation
+  that stitches the design in machine order and stops at each colour change.
+- Checks that everything fits inside the hoop and its margin, and checks each saved PES file
+  by reading it back.
+
+There is a desktop window (also as a single Windows `.exe`) and a command line. Both use the
+same conversion code. See [Future features](#future-features) for what's planned next.
 
 ## Windows app (.exe)
 
 `svg2pes.exe` is a single file that runs without Python installed. Double-click it, or drag
-an SVG onto it to open that file straight away. The first launch takes a few seconds while
-it unpacks.
+a design onto it to open it straight away. The first launch takes a few seconds while it
+unpacks.
 
-To build it yourself, run this in PowerShell from the project folder:
+To build it yourself, run this in PowerShell from the project folder (close the app first):
 
     .\build_exe.ps1
 
@@ -58,91 +77,122 @@ macOS.
     git clone https://github.com/MRC757/svg2pes.git
     cd svg2pes
     pip install -r requirements.txt
+    python -m svg2pes gui                 # or double-click svg2pes_gui.pyw on Windows
 
 ## Using the window
 
-    python -m svg2pes gui                 # or double-click svg2pes_gui.pyw on Windows
+### Getting artwork in
+- **File → Open…** (Ctrl+O) starts a new design from an SVG, a project (`.svg2pes`), an
+  embroidery file (PES, DST, JEF, EXP, VP3) or a picture. The design is centred in the hoop
+  and shrunk if it is too big.
+- **File → Import into this design…** (Ctrl+I) adds another file's objects to the current
+  design. **File → Import picture…** traces a picture: choose the number of thread colours,
+  the width, whether to leave out the background, and the detail level. A preview shows the
+  result and names the threads. Simple, flat-coloured pictures (logos, clip art) work best.
+- **Add text…** (Ctrl+T): type the text, choose a font and the letter height (the height of
+  the capitals).
+  - The **Single-line** fonts at the top of the list sew each letter as one clean line, which
+    is best for small lettering.
+  - *Arc* bends the text: 90 arches it up, -90 curves it down.
+  - *Monogram* lays out three letters with the middle one larger.
+  - Double-click text to edit it.
 
-1. **Open SVG…** (Ctrl+O). The design is centred in the hoop (and shrunk if it is too big).
-   Each object appears with two swatches: its colour in the SVG and the Brother thread it
-   will be sewn in.
-2. **Choose threads.** Double-click an object (or select several and press **Choose
-   thread…**) to pick one of the 61 threads. Tick *Also use it for…* to recolour every object
-   that had the same SVG colour. **Sew / skip** (Space) leaves objects out.
-3. **Arrange.** Select what you want to change:
-   - drag a box around objects in the preview. Everything entirely inside is selected, and the
-     objects that will be caught are highlighted while you drag. Hold Shift to add to the
-     selection.
-   - or click an object's outline, or click inside a shape (Shift or Ctrl adds to the
-     selection)
-   - **Select all** (Ctrl+A) for the whole design, Esc for nothing
+### Threads, fills and outlines
+Each object is listed with two swatches: its colour in the artwork and the Brother thread it
+will be sewn in.
 
-   Then:
-   - drag the selection to move it, and use the arrow keys to nudge 1 mm (Shift: 0.1 mm)
-   - drag a corner handle to resize, or the round handle to rotate (Shift: 15° steps)
-   - or type an exact size, position or angle in the **Arrange** tab, which also has
-     **⟲ 90° / ⟳ 90°**, **Centre in hoop**, **Fit to hoop** and **Reset**
+- **Choose thread…** (or double-click an object) picks one of the 61 threads. Tick *Also use
+  it for…* to recolour every object that had the same artwork colour.
+- **Fill / outline…** (or double-click the **Fill** column) sets the stitches for the
+  selected objects:
+  - **Fill:** on or off; the thread (the outline's, or another); the row angle (it turns
+    with the object); row spacing (0.4 mm is typical; smaller is denser); stitch length;
+    pull compensation; and underlay.
+  - **Outline:** on or off; run stitch or a satin column of a set width.
+  - Only closed shapes can be filled.
+- **Sew / skip** (Space) leaves objects out without deleting them.
 
-   With nothing selected, the Arrange tab acts on the whole design. Anything outside the
-   sewing area is outlined in red, and Save stays off until it is moved back in.
-4. **Add text…** (Ctrl+T). Type the text, then pick a font and the letter height (the height
-   of the capitals; 8 mm or more sews best). The text appears in the middle of the hoop in
-   900 Black. Drag it into place and change its thread like any other object. Double-click
-   it to edit, or press **Delete text** to remove it.
-5. **Fill shapes.** Select closed shapes (such as the wings of a butterfly) and press
-   **Fill…**, or double-click the **Fill** column. Choose the thread (the outline's, or another),
-   the angle of the stitch rows, the row spacing (0.4 mm is typical; smaller is denser) and the
-   stitch length. Untick *Also sew the outline* for a fill without a border. Open shapes, like
-   a line, can't be filled.
-6. Check the **Stitching** tab (hoop, margin, stitch length) and the **Sewing order** tab (one
-   row per thread change on the machine).
-7. **Check the stitches** (see below), then **Save PES…** (Ctrl+S). It suggests a short file
-   name without spaces for the USB stick.
+### Arranging
+Select objects by dragging a box around them in the preview (Shift adds to the selection), by
+clicking an outline or the inside of a shape, or in the list. **Select all** is Ctrl+A, and
+Esc selects nothing. Then:
 
-Undo and Redo (Ctrl+Z / Ctrl+Y) cover every change in the window.
+- drag the selection to move it, a corner handle to resize, or the round handle to rotate
+  (Shift: 15° steps). Arrow keys nudge 1 mm (Shift: 0.1 mm).
+- in the **Arrange** tab, type an exact size, position or angle. The tab also has ⟲/⟳ 90°,
+  Centre in hoop, Fit to hoop, Reset, Flip ↔/↕, Align (edges, centres, space evenly), Group
+  and Ungroup. With nothing selected it acts on the whole design.
+- **Edit** menu: Copy (Ctrl+C), Paste (Ctrl+V), Duplicate (Ctrl+D) and Delete (Del). Group
+  is Ctrl+G and Ungroup Ctrl+Shift+G; clicking one member of a group selects the whole
+  group.
+
+Anything outside the sewing area is outlined in red, and Save stays off until it is moved back
+in. **View → Inches** shows sizes in inches. Undo and Redo (Ctrl+Z / Ctrl+Y) cover every
+change.
+
+### Settings and sewing order
+- **Stitching** tab:
+  - hoop (pick a preset or type a size), margin and run-stitch length
+  - *Keep drawing order*: sew in the artwork's order (usually means more colour changes)
+  - *Cut fills out under filled shapes stacked on top*
+  - machine speed, used for the time estimate
+  - PES version
+- **Sewing order** tab: one row per thread change, with its stitches and time. Select a stop
+  and press **▲ Earlier** / **▼ Later** to change the order. Fills always stay before
+  outlines. **Automatic order** goes back to the fewest colour changes. The estimated total
+  time is shown here and under the preview.
 
 ### Looking at the stitches
+The preview is drawn from the stitches that will be saved, not from the artwork.
 
-The preview is drawn from the stitches that will be saved, not from the SVG.
-
-- **Zoom:** scroll the mouse wheel over the preview to zoom in on the point under the
-  pointer, or use **−** / **+** (keys `-` / `+`). Right-drag or middle-drag to pan.
-  **Fit** (key `0`) shows the whole hoop again. Zoomed in, stitches are drawn about as thick
-  as real thread, with a dot at each needle point (turn the dots off with **Needle
-  points**). Thin pink lines are jumps (**Show jumps**).
-- **Sew-out:** press **▶ Sew** to watch the design stitched in the order the machine will sew
-  it. A red marker shows the needle, and the parts not sewn yet are shown faintly.
-  - Choose the speed from the list next to the slider. Drag the slider to jump to any point.
+- **Zoom:** scroll over the preview, or use **−** / **+** (keys `-` / `+`). Right-drag or
+  middle-drag pans, and **Fit** (key `0`) shows the whole hoop. Zoomed in, stitches are drawn
+  about as thick as real thread, with a dot at each needle point (**Needle points**). Thin
+  pink lines are jumps (**Show jumps**).
+- **Sew-out:** **▶ Sew** stitches the design in machine order, with a red needle marker and
+  the unsewn part shown faintly.
+  - Choose the speed, or drag the slider to any point.
   - **⏮** goes back to the start, and **⏭** shows the finished design.
-  - With *Stop at colour changes* ticked, playback pauses at each thread change, like the
-    machine, and names the next thread. Press **▶ Sew** to carry on.
-  - Zooming and panning work while it plays.
+  - *Stop at colour changes* pauses at each thread change and names the next thread.
+
+### Saving
+- **Save project** (Ctrl+Shift+S) saves everything to a `.svg2pes` file: outlines,
+  positions, threads, fills, text, groups, sewing order and settings. Open it again with
+  File → Open. The window asks before closing or opening over unsaved changes.
+- **Save PES…** (Ctrl+S) writes the file for the machine and suggests a short name without
+  spaces for the USB stick.
 
 ## Using the command line
 
     python -m svg2pes list design.svg            # objects, ids, colours and nearest threads
     python -m svg2pes palette                    # the 61 Brother threads
     python -m svg2pes convert design.svg -o design.pes --preview design.png \
-        --set sun=brother:205 --set badge="Sky Blue" --map "#ffffff=Black" --skip wave
+        --set sun=brother:205 --fill wing1 --fill wing2=Yellow --satin border=2.5
 
 | Option | Meaning |
 | --- | --- |
 | `--set OBJECT=COLOUR` | colour of one object, by SVG id or by its number from `list` |
 | `--map OLD=NEW` | recolour every object that uses one SVG colour |
 | `--skip OBJECT` | leave an object out |
+| `--fill OBJECT[=COLOUR]` | fill a closed shape, in COLOUR or else its own thread |
+| `--no-outline OBJECT` | don't sew the outline (for a fill without a border) |
+| `--satin OBJECT[=WIDTH]` | sew the outline as a satin column, WIDTH mm (default 2) |
+| `--fill-angle DEG` | direction of the fill rows (default 45) |
+| `--fill-spacing MM` | distance between fill rows; smaller is denser (default 0.4) |
+| `--fill-stitch MM` | fill stitch length (default 3.5) |
+| `--pull-comp MM` | added to each end of a fill row (default 0.2) |
+| `--no-underlay` | fills without underlay |
+| `--no-cutout` | don't cut fills out under filled shapes stacked above |
 | `--width MM` | scale the design to this width |
 | `--fit` | shrink the design to fit the hoop if it is too big |
 | `--hoop WxH` | hoop size in mm (default `100x100`) |
 | `--margin MM` | space kept clear inside the hoop (default 2) |
 | `--stitch-len MM` | run-stitch length, 0.5–12 (default 2.5) |
 | `--keep-order` | keep the SVG drawing order (usually means more colour changes) |
+| `--svg-dpi DPI` | the SVG's own units per inch, e.g. 72 for Illustrator exports |
+| `--speed SPM` | machine speed for the time estimate (default 650 stitches/min) |
 | `--pes-version 1\|6` | PES format version (default 1, tested on the PE540D) |
 | `--no-snap` | keep the exact SVG colours instead of Brother threads |
-| `--fill OBJECT[=COLOUR]` | fill a closed shape, in COLOUR or else its own thread |
-| `--no-outline OBJECT` | don't sew the outline (for a fill without a border) |
-| `--fill-angle DEG` | direction of the fill rows (default 45) |
-| `--fill-spacing MM` | distance between fill rows; smaller is denser (default 0.4) |
-| `--fill-stitch MM` | fill stitch length (default 3.5) |
 
 COLOUR can be any of these:
 - `#rrggbb`
@@ -150,7 +200,8 @@ COLOUR can be any of these:
 - `brother:<thread number>`, the Embroidery number on the spool (`brother:900` is Black)
 - `chart:<row>`, the row number (1–61) in the chart
 
-With `--no-snap` the machine shows the nearest Brother colour name for each thread.
+The command line prints the stitch count, size, estimated sewing time and the thread for each
+colour stop.
 
 ## Trying it on the machine
 
@@ -161,72 +212,75 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
 **What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
-(`samples/sample.pes`) loads and is read by the PE540D. Fills, added text and arranged
-layouts are tested in code and in the preview, but have not been sewn yet. Sew a test
-piece before using them on a real project.
+(`samples/sample.pes`) loads and is read by the PE540D. Fills, satin, lettering, imported
+pictures and arranged layouts are tested in code and in the preview, but have not been sewn
+yet. Sew a test piece before using them on a real project.
 
 ## Limitations
 
-- Fills are plain tatami: there is no underlay or pull compensation yet, so use a firm
-  stabiliser. On stretchy fabric a fill can pull in slightly from its outline.
-- Where filled shapes overlap, both fills are sewn (one on top of the other). The overlap is
-  not cut out of the lower fill.
-- A fill's row angle is measured in the hoop, so rotating a filled object doesn't turn its
-  rows with it. Set the angle in **Fill…** after rotating.
-- Satin stitch (for borders and small text) is not built yet.
-- Text inside the SVG, images, gradients and opacity are ignored. Use **Add text…** for
-  lettering, or convert text to paths in your drawing program.
-- Added text uses outline fonts, sewn as letter outlines or filled. Small text (under about
-  8 mm) gets crowded, and kerning is not applied.
-- There is no project file yet. A PES file can't be opened again for editing, and closing the
-  window loses the layout, threads, fills and text. Save the PES before you close.
-- The PE540D has no automatic thread cutter, so it most likely ignores the trim codes written
-  for long jumps. Snip those threads by hand after sewing.
-- SVGs saved at 72 dpi (some Illustrator exports) come out about 25% smaller than intended.
-  Use `--width`, or the size boxes in the Arrange tab.
-- Grouping by colour changes the sewing order. All fills are sewn before all outlines, but
-  overlapping fills in different threads may not follow the SVG's stacking order. Use
-  *Keep drawing order* (Stitching tab, or `--keep-order`) when stacking matters. It
-  usually adds colour changes.
+- **Satin** works best at 1.5 mm or wider on gentle curves. On very tight curves (smaller than
+  the column is wide) it fans out. For small script lettering, use a single-line font with run
+  stitch.
+- **Fills** are tatami only: there is no contour or radial fill. Very thin areas fill
+  poorly; give them a satin outline instead.
+- **Overlapping fills:** the area under an upper fill is cut out of the fill below it, but
+  shapes that are only outlined don't cut anything out.
+- **Text:**
+  - Outline-font text gets crowded below about 8 mm.
+  - Kerning is not applied.
+  - The single-line fonts cover basic Latin letters only.
+  - Editing text that came from an SVG drops any rotation it had in the SVG.
+- **Pictures:** photos and soft gradients don't trace into good embroidery. Use simple
+  flat-coloured artwork.
+- **Imported embroidery files** are sewn exactly as they are. They can be moved, rotated,
+  recoloured and skipped, but not refilled. Resizing them changes their stitch density.
+- **SVG features ignored:** gradients, opacity, clipping masks and pictures embedded inside an
+  SVG.
+- **Thread cutting:** the PE540D has no automatic cutter, so it most likely ignores the trim
+  codes written for long jumps. Snip those threads by hand after sewing.
+- **Time estimate:** it assumes the machine averages 85% of the speed you set, plus a minute
+  per thread change. Real times vary.
 
 ## Future features
 
-Ideas for later versions, roughly in order of importance. Tick them off as they are done.
+Finished items are ticked.
 
 ### Better sewing quality
-- [ ] **Fill underlay:** a light layer of stitches under each fill (an edge run plus sparse
-      rows across) so the fill lies flat and doesn't sink into the fabric.
-- [ ] **Pull compensation:** widen fills slightly so they don't pull in from their outlines.
-- [ ] **Satin stitch:** smooth zig-zag columns for borders, outlines of a set width and
-      small lettering.
-- [ ] **Cut out overlaps:** cut the area under an upper shape out of the fill below, so
-      fills don't pile up into stiff patches.
-- [ ] **Travel stitches instead of jumps:** run hidden stitches under a fill to reach the
-      next row or shape. The PE540D has no thread cutter, so every jump is a thread to snip.
-- [ ] **Smarter sewing order:** let the user drag colour stops into order, and choose the
-      order that needs the fewest colour changes and jumps.
-- [ ] **Fill angle follows rotation:** keep a fill's row direction relative to its object.
+- [x] **Fill underlay:** sparse rows at right angles, kept in from the edge, so the fill lies
+      flat.
+- [x] **Pull compensation:** fill rows are lengthened slightly at the shape's edge.
+- [x] **Satin stitch:** zig-zag columns of a set width for borders, with centre-walk underlay.
+- [x] **Cut out overlaps:** fill under filled shapes stacked on top is left out.
+- [x] **Travel stitches instead of jumps** between the pieces of a fill.
+- [x] **Smarter sewing order:** move colour stops earlier or later, or use the automatic
+      order with the fewest colour changes.
+- [x] **Fill angle follows rotation.**
+- [ ] **Satin lettering:** satin columns that follow the shape of outline-font letters.
+- [ ] **Edge-run underlay** and **contour fills** that follow a shape's outline.
+- [ ] **Travel stitches between objects** of the same colour, not only within a fill.
 
 ### Designing and editing
-- [ ] **Project files:** save and reopen a layout (objects, threads, fills, text) to keep
-      working on it later.
-- [ ] **Open PES files:** load an existing design to view it, simulate it or recolour it.
-- [ ] **Copy, paste and duplicate**, plus **mirror/flip**, **align and distribute**, and
+- [x] **Project files** (`.svg2pes`).
+- [x] **Open PES files** (and DST, JEF, EXP, VP3) to view, simulate or recolour them.
+- [x] **Copy, paste and duplicate**, **mirror/flip**, **align and distribute**,
       **group/ungroup**.
-- [ ] **Text from the SVG:** stitch `<text>` elements with the matching installed font
-      instead of ignoring them.
-- [ ] **Single-line (stroke) fonts and monograms** for small, clean lettering.
-- [ ] **Text on a curve** (arched names and badges).
-- [ ] **Image import:** PNG/JPEG reduced to a few thread colours and traced into shapes.
-- [ ] **Hoop presets** (Brother 4" × 4" and others) and an **inches/mm** switch.
-- [ ] **Spot the 72 dpi problem:** warn when an SVG's size looks like a 72 dpi export.
+- [x] **Text from the SVG**, stitched with the matching installed font.
+- [x] **Single-line fonts and monograms.**
+- [x] **Text on a curve.**
+- [x] **Image import:** PNG/JPEG reduced to thread colours and traced into shapes.
+- [x] **Hoop presets** and an **inches/mm** switch.
+- [x] **Spot the 72 dpi problem** in Illustrator exports.
+- [ ] **Edit points:** drag individual points of a shape.
+- [ ] **Text along any path**, not only a circular arc.
+- [ ] **Picture tracing with smoothing controls** and the option to merge similar colours.
 
 ### Machine and output
-- [ ] **Other formats:** DST, JEF, EXP and VP3 (pyembroidery can write them) for other
+- [x] **Sewing-time estimates** for the whole design and each colour stop.
+- [ ] **Other formats:** DST, JEF, EXP and VP3 output (pyembroidery can write them) for other
       machines.
-- [ ] **Thread and time estimates:** thread used per colour and an estimated sewing time.
-- [ ] **Printable worksheet:** a page with the design, its size, the colour sequence and
-      the thread numbers to have ready at the machine.
+- [ ] **Thread estimates:** thread used per colour.
+- [ ] **Printable worksheet:** a page with the design, its size, the colour sequence and the
+      thread numbers to have ready at the machine.
 - [ ] **Other thread brands:** pick by Madeira, Sulky or Robison-Anton number, using the
       matching columns of the Brother conversion chart.
 - [ ] **Basting box:** an optional outline around the design that holds the fabric and
@@ -243,14 +297,17 @@ Ideas for later versions, roughly in order of importance. Tick them off as they 
 
 | Path | What it does |
 | --- | --- |
-| `svg2pes/svg_import.py` | reads the SVG into objects made of polylines, in mm |
+| `svg2pes/svg_import.py` | reads SVG into objects made of polylines, in mm (shapes and text) |
+| `svg2pes/image_import.py` | traces pictures into thread-colour shapes |
+| `svg2pes/pes_import.py` | reads existing embroidery files as objects of exact stitches |
 | `svg2pes/palette.py` | the 61 Brother threads and colour parsing |
-| `svg2pes/stitching.py` | outline simplification, needle drops, tie stitches, ordering |
-| `svg2pes/convert.py` | sizing, colour choices, stitch planning, PES writing and checking |
+| `svg2pes/fill.py` | fill (tatami, underlay, pull compensation, cut-outs, travel) and satin |
+| `svg2pes/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
+| `svg2pes/convert.py` | sizing, colour choices, stitch planning, time estimate, PES writing |
+| `svg2pes/text.py` | text with installed and single-line fonts, arcs, monograms |
 | `svg2pes/geometry.py` | move, resize and rotate transforms |
-| `svg2pes/fill.py` | fill (tatami) stitches for closed shapes |
-| `svg2pes/text.py` | text to outlines with installed fonts |
-| `svg2pes/preview.py` | draws the stitch preview (whole hoop or zoomed) and the sew-out |
+| `svg2pes/project.py` | `.svg2pes` project files |
+| `svg2pes/preview.py` | the stitch preview (whole hoop or zoomed) and the sew-out |
 | `svg2pes/gui.py` | the Tkinter window |
 | `svg2pes/cli.py` | the command line |
 | `svg2pes/assets/` | app icon |
@@ -263,9 +320,10 @@ Ideas for later versions, roughly in order of importance. Tick them off as they 
 
 ## Built with
 
-[pyembroidery](https://github.com/EmbroidePy/pyembroidery) (PES writing),
+[pyembroidery](https://github.com/EmbroidePy/pyembroidery) (embroidery files),
 [svgelements](https://github.com/meerk40t/svgelements) (SVG parsing),
-[fontTools](https://github.com/fonttools/fonttools) (fonts), Pillow and NumPy.
+[fontTools](https://github.com/fonttools/fonttools) (fonts),
+[Hershey-Fonts](https://github.com/apshu/HersheyFonts) (single-line fonts), Pillow and NumPy.
 Brother and PE540D are trademarks of Brother Industries, Ltd. This project is not affiliated
 with Brother.
 

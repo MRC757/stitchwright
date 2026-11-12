@@ -702,12 +702,24 @@ class App:
     def _build(self):
         r, ui = self.root, self.ui
         r.title(TITLE)
-        # Fit the screen (leaving room for the taskbar); maximise if the full size won't fit.
+        # Fit the usable screen (without the taskbar), counting the title bar and menu bar;
+        # maximise if the full size won't fit.
         sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+        top, avail_h = 0, sh - 100
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                rect = wintypes.RECT()
+                ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)  # work area
+                top, avail_h = rect.top, rect.bottom - rect.top
+            except (AttributeError, OSError):
+                pass
+        frame = int(70 * ui)                          # title bar + menu bar
         want_w, want_h = int(1200 * ui), int(820 * ui)
-        w, h = min(want_w, sw - 40), min(want_h, sh - 100)
-        r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2 - 30)}")
-        r.minsize(min(int(900 * ui), sw - 40), min(int(560 * ui), sh - 100))
+        w, h = min(want_w, sw - 40), min(want_h, avail_h - frame)
+        r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{top + max(0, (avail_h - frame - h) // 2)}")
+        r.minsize(min(int(900 * ui), sw - 40), min(int(560 * ui), avail_h - frame))
         if sys.platform == "win32" and (w < want_w or h < want_h):
             r.state("zoomed")
         style = ttk.Style(r)
