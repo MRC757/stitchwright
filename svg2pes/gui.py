@@ -28,9 +28,13 @@ from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_vie
 from .stitching import Settings
 from .svg_import import Design, DesignObject, Polyline, load_svg
 from .fill import FillSpec, SatinSpec, can_fill
+from .pes_import import READ_EXTENSIONS, load_stitches
+from .project import EXTENSION as PROJECT_EXTENSION
+from .project import Project, load_project, save_project
 from .text import TextSpec, default_font, installed_fonts, text_polylines
 
 TITLE = "svg2pes – SVG to Brother PES"
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 OK_COLOUR, WARN_COLOUR, ERROR_COLOUR = "#2e7d32", "#9a6700", "#c62828"
 SELECT_COLOUR = "#1a73e8"
 SHIFT, CONTROL = 0x0001, 0x0004
@@ -483,6 +487,8 @@ class App:
         self.extra_objs: dict[str, DesignObject] = {}  # copies, imported stitches and images
         self.groups: dict[str, str] = {}             # obj_id -> group id
         self.clipboard: list[dict] = []
+        self.project_path: str | None = None
+        self.dirty = False                           # changes since the project was saved
         self.texts: dict[str, TextSpec] = {}
         self.order_ids: list[str] = []
         self.mats: dict[str, Affine] = {}      # outline -> hoop placement, per object
@@ -572,8 +578,9 @@ class App:
 
         bar = ttk.Frame(r, padding=(8, 8, 8, 0))
         bar.pack(fill="x")
-        ttk.Button(bar, text="Open SVG…", command=self.ask_open).pack(side="left")
+        ttk.Button(bar, text="Open…", command=self.ask_open).pack(side="left")
         ttk.Button(bar, text="Add text…", command=self.add_text).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Save project", command=self.save_project).pack(side="left", padx=(6, 0))
         self.b_save = ttk.Button(bar, text="Save PES…", command=self.save, state="disabled")
         self.b_save.pack(side="left", padx=6)
         self.b_undo = ttk.Button(bar, text="Undo", command=self.undo, state="disabled", width=6)
@@ -805,6 +812,10 @@ class App:
         self.l_sim.pack(fill="x", pady=(2, 0))
 
         r.bind_all("<Control-o>", lambda e: self._main_key(e, self.ask_open))
+        r.bind_all("<Control-n>", lambda e: self._main_key(e, self.new_design))
+        r.bind_all("<Control-i>", lambda e: self._main_key(e, self.ask_import))
+        r.bind_all("<Control-S>", lambda e: self._main_key(e, self.save_project))
+        r.protocol("WM_DELETE_WINDOW", self.exit_app)
         r.bind_all("<Control-s>", lambda e: self._main_key(e, self.save))
         r.bind_all("<Control-t>", lambda e: self._main_key(e, self.add_text))
         r.bind_all("<Control-z>", lambda e: self._main_key(e, self.undo, text_ok=False))
@@ -837,12 +848,19 @@ class App:
         """The menu bar. Commands still to come are added by later sections."""
         bar = tk.Menu(self.root)
         self.m_file = tk.Menu(bar, tearoff=False)
-        self.m_file.add_command(label="Open SVG…", accelerator="Ctrl+O", command=self.ask_open)
+        self.m_file.add_command(label="New", accelerator="Ctrl+N", command=self.new_design)
+        self.m_file.add_command(label="Open…", accelerator="Ctrl+O", command=self.ask_open)
+        self.m_file.add_command(label="Import into this design…", accelerator="Ctrl+I",
+                                command=self.ask_import)
         self.m_file.add_command(label="Add text…", accelerator="Ctrl+T", command=self.add_text)
         self.m_file.add_separator()
-        self.m_file.add_command(label="Save PES…", accelerator="Ctrl+S", command=self.save)
+        self.m_file.add_command(label="Save project", accelerator="Ctrl+Shift+S",
+                                command=self.save_project)
+        self.m_file.add_command(label="Save project as…", command=lambda: self.save_project(True))
+        self.m_file.add_command(label="Save PES for the machine…", accelerator="Ctrl+S",
+                                command=self.save)
         self.m_file.add_separator()
-        self.m_file.add_command(label="Exit", command=self.root.destroy)
+        self.m_file.add_command(label="Exit", command=self.exit_app)
         bar.add_cascade(label="File", menu=self.m_file)
         m = tk.Menu(bar, tearoff=False)
         m.add_command(label="Undo", accelerator="Ctrl+Z", command=self.undo)
@@ -953,6 +971,7 @@ class App:
         self.refresh()
 
     def push_undo(self):
+        self.dirty = True
         self.undo_stack.append(self._state())
         del self.undo_stack[:-100]
         self.redo_stack.clear()
@@ -975,62 +994,249 @@ class App:
         self.b_redo.configure(state="normal" if self.redo_stack else "disabled")
 
     # ---------------------------------------------------------------- files
+    OPEN_TYPES = [("Designs", "*.svg *.svg2pes *.pes *.dst *.jef *.exp *.vp3 *.png *.jpg *.jpeg *.bmp *.gif"),
+                  ("SVG artwork", "*.svg"), ("svg2pes projects", "*.svg2pes"),
+                  ("Embroidery files", "*.pes *.dst *.jef *.exp *.vp3"),
+                  ("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"), ("All files", "*.*")]
+
     def ask_open(self):
-        path = filedialog.askopenfilename(
-            parent=self.root, title="Open SVG artwork",
-            filetypes=[("SVG artwork", "*.svg"), ("All files", "*.*")])
+        if not self._confirm_discard():
+            return
+        path = filedialog.askopenfilename(parent=self.root, title="Open a design",
+                                          filetypes=self.OPEN_TYPES)
         if path:
             self.open(path)
 
+    def _load_any(self, path: str):
+        """Load an SVG or an embroidery file as a Design (raises OSError / ValueError)."""
+        ext = os.path.splitext(path)[1].lower()
+        if ext in READ_EXTENSIONS:
+            return load_stitches(path)
+        return load_svg(path)
+
     def open(self, path: str):
+        """Open a file as a new design: SVG, project, embroidery file or picture."""
+        ext = os.path.splitext(path)[1].lower()
+        if ext == PROJECT_EXTENSION:
+            self.open_project(path)
+            return
+        if ext in IMAGE_EXTENSIONS:
+            self.new_design(confirm=False)
+            self.import_image(path)
+            return
         try:
-            design = load_svg(path)
+            design = self._load_any(path)
         except (OSError, ValueError) as e:
             messagebox.showerror(TITLE, f"Could not open {path}:\n\n{e}", parent=self.root)
             return
         if not design.objects:
-            messagebox.showerror(TITLE, "No stitchable shapes were found in this SVG.\n\n"
+            messagebox.showerror(TITLE, "No stitchable shapes were found in this file.\n\n"
                                  + "\n".join(sorted(set(design.warnings))), parent=self.root)
             return
+        self._start_design(design, path)
+
+    def _clear_design(self):
+        for d in (self.svg_map, self.text_objs, self.extra_objs, self.groups, self.texts,
+                  self.colours, self.fills, self.satins, self.mats, self.home):
+            d.clear()
+        for st in (self.no_outline, self.skipped):
+            st.clear()
+        self.color_order.clear()
+        self.order_ids = []
+        self.warnings = []
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self._undo_buttons()
+        self.project_path = None
+        self.dirty = False
+
+    def _fit_matrix(self, objects):
+        """Placement that centres objects in the hoop, shrunk to fit if too big."""
+        x0, y0, x1, y1 = bounds([p for o in objects for pl in o.polylines for p in pl.points])
+        aw, ah = self.hoop[0] - 2 * self.margin, self.hoop[1] - 2 * self.margin
+        limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 0]
+        s = min([1.0] + limits)
+        return chain(translate(-(x0 + x1) / 2, -(y0 + y1) / 2), scale(s)), s
+
+    def _start_design(self, design, path: str):
         try:
             self._read_hoop()
         except ValueError:
             pass            # keep the last good hoop size
+        self._clear_design()
         self.svg_path = path
         self.svg_map = {o.obj_id: o for o in design.objects}
-        self.text_objs.clear()
-        self.extra_objs.clear()
-        self.groups.clear()
-        self.texts.clear()
-        self.colours.clear()
-        self.fills.clear()
-        self.no_outline.clear()
-        self.satins.clear()
-        self.color_order.clear()
-        self.skipped.clear()
-        self.undo_stack.clear()
-        self.redo_stack.clear()
-        self._undo_buttons()
         self.order_ids = [o.obj_id for o in design.objects]
         self.warnings = ["Text in the SVG was ignored: use Add text… instead" if "Text element" in w
                          else w for w in design.warnings]
-
-        # Start centred in the hoop, shrunk to fit if it is too big.
-        x0, y0, x1, y1 = bounds([p for o in design.objects for pl in o.polylines for p in pl.points])
-        aw, ah = self.hoop[0] - 2 * self.margin, self.hoop[1] - 2 * self.margin
-        limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 0]
-        s = min([1.0] + limits)
-        m = chain(translate(-(x0 + x1) / 2, -(y0 + y1) / 2), scale(s))
+        if any(o.stitches for o in design.objects):
+            m, s = IDENTITY, 1.0          # embroidery files are already placed on the hoop
+        else:
+            m, s = self._fit_matrix(design.objects)
         self.mats = {i: m for i in self.order_ids}
         self.home = dict(self.mats)
-
-        self.l_file.configure(text=os.path.basename(path))
-        self.root.title(f"{os.path.basename(path)} – {TITLE}")
+        self._set_title(os.path.basename(path))
         self.fill_objects()
         self.refresh()
         if s < 1:
             self.set_status(f"The design was shrunk to {s:.0%} to fit the hoop. Use Arrange to "
                             "change its size.", WARN_COLOUR)
+
+    def _set_title(self, name: str):
+        self.l_file.configure(text=name)
+        self.root.title(f"{name} – {TITLE}")
+
+    def new_design(self, confirm: bool = True):
+        if confirm and not self._confirm_discard():
+            return
+        self._clear_design()
+        self.svg_path = None
+        self._set_title("New design")
+        self.fill_objects()
+        self.refresh()
+        self.set_status("New design: open or import artwork, or add text.")
+
+    def ask_import(self):
+        path = filedialog.askopenfilename(parent=self.root, title="Import into this design",
+                                          filetypes=[t for t in self.OPEN_TYPES
+                                                     if "svg2pes" not in t[0]])
+        if path:
+            self.import_file(path)
+
+    def import_file(self, path: str):
+        """Add the objects of an SVG or embroidery file to the current design."""
+        ext = os.path.splitext(path)[1].lower()
+        if ext in IMAGE_EXTENSIONS:
+            self.import_image(path)
+            return
+        try:
+            design = self._load_any(path)
+        except (OSError, ValueError) as e:
+            messagebox.showerror(TITLE, f"Could not import {path}:\n\n{e}", parent=self.root)
+            return
+        if not design.objects:
+            self.set_status("Nothing stitchable was found in that file.", WARN_COLOUR)
+            return
+        self.add_objects(design.objects, keep_place=any(o.stitches for o in design.objects))
+        if self.svg_path is None:
+            self.svg_path = path
+
+    def add_objects(self, objects, keep_place: bool = False, fills=None):
+        """Add new objects to the design (renamed if their ids are taken), centred in the
+        hoop (or left where they are), and select them."""
+        self.push_undo()
+        index = max([self.obj(i).index for i in self.order_ids], default=0)
+        m = IDENTITY if keep_place else self._fit_matrix(objects)[0]
+        new_ids = []
+        for o in objects:
+            nid, n = o.obj_id, 2
+            while nid in self.mats or nid in self.svg_map or nid in self.text_objs:
+                nid = f"{o.obj_id}_{n}"
+                n += 1
+            index += 1
+            self.extra_objs[nid] = replace(o, index=index, obj_id=nid)
+            self.order_ids.append(nid)
+            self.mats[nid] = self.home[nid] = m
+            if fills and o.obj_id in fills:
+                self.fills[nid] = fills[o.obj_id]
+            new_ids.append(nid)
+        self.fill_objects()
+        self.tree.selection_set(new_ids)
+        self.refresh()
+        self.set_status(f"Added {len(new_ids)} object(s). They are selected: drag them into place.")
+        return new_ids
+
+    # ---------------------------------------------------------------- projects
+    def _project(self) -> Project:
+        objs = [self.obj(i) for i in self.order_ids]
+        settings = {"hoop": [self.v_hoop_w.get(), self.v_hoop_h.get()],
+                    "margin": self.v_margin.get(), "stitch_len": self.v_stitch.get(),
+                    "keep_order": self.v_keep.get(), "knockout": self.v_knockout.get(),
+                    "machine_spm": self.v_spm.get(), "pes_version": self.v_pes.get()}
+        return Project(objs, dict(self.mats), dict(self.home), dict(self.colours),
+                       set(self.skipped), dict(self.fills), set(self.no_outline),
+                       dict(self.satins), dict(self.texts), dict(self.groups),
+                       list(self.color_order), settings, self.svg_path, list(self.warnings))
+
+    def save_project(self, save_as: bool = False) -> bool:
+        if not self.order_ids:
+            self.set_status("Nothing to save yet.", WARN_COLOUR)
+            return False
+        path = self.project_path
+        if save_as or not path:
+            base = os.path.splitext(os.path.basename(self.svg_path or "design"))[0]
+            folder = os.path.dirname(self.svg_path) if self.svg_path else os.path.expanduser("~")
+            path = filedialog.asksaveasfilename(
+                parent=self.root, title="Save project", defaultextension=PROJECT_EXTENSION,
+                initialfile=base + PROJECT_EXTENSION, initialdir=folder,
+                filetypes=[("svg2pes project", "*" + PROJECT_EXTENSION)])
+            if not path:
+                return False
+        try:
+            save_project(path, self._project())
+        except OSError as e:
+            messagebox.showerror(TITLE, f"Could not save {path}:\n\n{e}", parent=self.root)
+            return False
+        self.project_path = path
+        self.dirty = False
+        self._set_title(os.path.basename(path))
+        self.set_status(f"Saved project {path}. Open it again with File → Open.", OK_COLOUR)
+        return True
+
+    def open_project(self, path: str):
+        try:
+            proj = load_project(path)
+        except (OSError, ValueError, TypeError, KeyError) as e:
+            messagebox.showerror(TITLE, f"Could not open {path}:\n\n{e}", parent=self.root)
+            return
+        self._clear_design()
+        st = proj.settings
+        if "hoop" in st:
+            self.v_hoop_w.set(str(st["hoop"][0]))
+            self.v_hoop_h.set(str(st["hoop"][1]))
+        for key, var in (("margin", self.v_margin), ("stitch_len", self.v_stitch),
+                         ("machine_spm", self.v_spm), ("pes_version", self.v_pes)):
+            if key in st:
+                var.set(str(st[key]))
+        for key, var in (("keep_order", self.v_keep), ("knockout", self.v_knockout)):
+            if key in st:
+                var.set(bool(st[key]))
+        try:
+            self._read_hoop()
+        except ValueError:
+            pass
+        for o in proj.objects:
+            (self.text_objs if o.obj_id in proj.texts else self.svg_map)[o.obj_id] = o
+        self.order_ids = [o.obj_id for o in proj.objects]
+        self.mats = {i: proj.mats.get(i, IDENTITY) for i in self.order_ids}
+        self.home = {i: proj.home.get(i, self.mats[i]) for i in self.order_ids}
+        self.colours, self.fills, self.satins = proj.colours, proj.fills, proj.satins
+        self.texts, self.groups = proj.texts, proj.groups
+        self.skipped, self.no_outline = proj.skipped, proj.no_outline
+        self.color_order, self.warnings = proj.color_order, proj.warnings
+        self.svg_path = proj.source or path
+        self.project_path = path
+        self._set_title(os.path.basename(path))
+        self.fill_objects()
+        self.refresh()
+        self.dirty = False
+
+    def _confirm_discard(self) -> bool:
+        """True if it's fine to throw away the current design (asks to save changes)."""
+        if not self.dirty or not self.order_ids:
+            return True
+        ans = messagebox.askyesnocancel(TITLE, "Save the changes to this design as a project "
+                                        "first?", parent=self.root)
+        if ans is None:
+            return False
+        return self.save_project() if ans else True
+
+    def import_image(self, path: str):
+        self.set_status("Picture import is not available yet.", WARN_COLOUR)
+
+    def exit_app(self):
+        if self._confirm_discard():
+            self.root.destroy()
 
     def save(self):
         if self._job is not None:            # settings changed moments ago: re-plan first
