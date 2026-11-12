@@ -210,6 +210,8 @@ class TextDialog(tk.Toplevel):
         ttk.Button(b, text="OK", command=self._ok).pack(side="right", padx=6)
 
         self.t_text.bind("<KeyRelease>", lambda e: self._schedule())
+        # Ctrl+Enter means OK: stop the text box also treating it as Enter (a new line)
+        self.t_text.bind("<Control-Return>", lambda e: (self._ok(), "break")[1])
         self.c_font.bind("<KeyRelease>", self._filter)
         self.c_font.bind("<<ComboboxSelected>>", lambda e: self._schedule())
         for v in (self.v_height, self.v_spacing, self.v_align, self.v_arc, self.v_mono):

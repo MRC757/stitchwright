@@ -17,6 +17,7 @@ and filled areas (tatami fill with underlay).
   installed font.
 - Pictures (PNG, JPEG, BMP, GIF), reduced to a few thread colours and traced into shapes.
 - Existing embroidery files (PES, DST, JEF, EXP, VP3), to view, simulate, move and recolour.
+  Files that carry no colours (DST, EXP) get distinct placeholder threads.
 - Illustrator's 72 dpi SVG exports are recognised and can be scaled to their intended size.
 
 **Threads**
@@ -26,7 +27,8 @@ and filled areas (tatami fill with underlay).
   twice for the same spool.
 
 **Stitches**
-- Run-stitch outlines with tie-in and tie-off stitches, and no stitch shorter than 0.4 mm.
+- Run-stitch outlines with tie-in and tie-off stitches, shorter stitches on tight curves (so
+  small circles sew round, not as polygons), and no stitch shorter than 0.4 mm.
 - Satin columns for borders, of any width from 0.5 to 8 mm, with a centre-walk underlay.
 - Fill (tatami) for closed shapes:
   - you choose the angle, density and stitch length
@@ -213,7 +215,7 @@ colour stop.
 1. Copy `samples/sample.pes` to a FAT32 USB stick. Use a short file name without spaces.
 2. Check that it loads, the size reads about 56 × 36 mm, and 5 colour stops appear.
    `samples/sample.pes` has been checked on a PE540D. `samples/sample_v2.pes` is the same design
-   made with the current code, with the sun in 214 Deep Gold.
+   made with version 0.2.0 (the sun in 214 Deep Gold, and shorter stitches on its curve).
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
 **What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
@@ -246,6 +248,13 @@ yet. Sew a test piece before using them on a real project.
 - **Time estimate:** it assumes the machine averages 85% of the speed you set, plus a minute
   per thread change. Real times vary.
 
+## If something goes wrong
+
+The window writes a log to `%LOCALAPPDATA%\svg2pes\svg2pes.log` (on macOS and Linux,
+`~/.svg2pes/svg2pes.log`): the files opened and saved, and the details of any unexpected
+error, which is also shown in a dialog. **Help → Open log folder** opens it; include the log
+when reporting a problem.
+
 ## Future features
 
 Finished items are ticked.
@@ -276,6 +285,7 @@ Finished items are ticked.
 - [x] **Hoop presets** and an **inches/mm** switch.
 - [x] **Spot the 72 dpi problem** in Illustrator exports.
 - [ ] **Edit points:** drag individual points of a shape.
+- [ ] **Remember the hoop and settings** between sessions (they are saved in projects now).
 - [ ] **Text along any path**, not only a circular arc.
 - [ ] **Picture tracing with smoothing controls** and the option to merge similar colours.
 
@@ -292,9 +302,12 @@ Finished items are ticked.
       stabiliser together while sewing.
 
 ### Project and packaging
-- [ ] **Automatic tests and builds:** GitHub Actions to run the tests and build the `.exe` on
-      every push.
-- [ ] **Tests for the window** (selection, arranging, undo) to go with the core tests.
+- [x] **Automatic tests and builds:** GitHub Actions runs the tests on every push and builds
+      the `.exe` on version tags.
+- [x] **Tests for editing** (arranging, groups, copy/paste, undo), through the `Document`
+      model with no window.
+- [x] **Installable package:** `pip install .` gives `svg2pes` and `svg2pes-gui` commands.
+- [ ] **Tests for mouse interaction** in the window (dragging, handles, box selection).
 - [ ] **Installer and code signing** for the Windows app, so SmartScreen doesn't warn.
 - [ ] **macOS and Linux builds.**
 
@@ -310,13 +323,19 @@ Finished items are ticked.
 | `svg2pes/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
 | `svg2pes/convert.py` | sizing, colour choices, stitch planning, time estimate, PES writing |
 | `svg2pes/text.py` | text with installed and single-line fonts, arcs, monograms |
-| `svg2pes/geometry.py` | move, resize and rotate transforms |
+| `svg2pes/geometry.py` | transforms and shared polyline helpers (simplify, smooth, ...) |
 | `svg2pes/project.py` | `.svg2pes` project files |
 | `svg2pes/preview.py` | the stitch preview (whole hoop or zoomed) and the sew-out |
-| `svg2pes/gui.py` | the Tkinter window |
+| `svg2pes/document.py` | the design being edited and every operation on it (no window) |
+| `svg2pes/gui.py` | the Tkinter window: draws the design and turns clicks into `Document` calls |
+| `svg2pes/dialogs.py` | the window's dialogs (threads, text, fill and outline, pictures) |
+| `svg2pes/log.py` | the log file |
 | `svg2pes/cli.py` | the command line |
 | `svg2pes/assets/` | app icon |
+| `pyproject.toml` | package metadata and dependencies |
 | `svg2pes.spec`, `build_exe.ps1`, `version_info.txt` | Windows .exe build |
+| `.github/workflows/ci.yml` | tests on every push, the `.exe` on version tags |
+| `CHANGELOG.md` | what changed in each version |
 
 ## Tests
 
