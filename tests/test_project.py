@@ -1,4 +1,5 @@
 """Tests: project files and opening embroidery files."""
+import pyembroidery
 import pytest
 
 from conftest import SAMPLE
@@ -50,3 +51,22 @@ def test_open_pes_keeps_every_stitch(tmp_path):
     assert again.report.stitch_count == rep.stitch_count
     with pytest.raises(ValueError):
         load_stitches(str(tmp_path / "x.txt"))
+
+
+def test_files_without_colours_get_distinct_placeholder_threads(tmp_path):
+    from svg2pes.pes_import import load_stitches
+    p = pyembroidery.EmbPattern()
+    for i, c in enumerate(("red", "blue", "green")):
+        if i:
+            p.color_change()
+        p.add_thread(c)
+        for k in range(10):
+            p.stitch_abs(i * 100 + k * 20, (k % 2) * 30)
+    p.end()
+    path = str(tmp_path / "three.dst")
+    pyembroidery.write_dst(p, path)
+    d = load_stitches(path)
+    assert len(d.objects) == 3
+    assert len({o.source_color for o in d.objects}) == 3          # three different threads
+    assert any("DST files carry no colours" in w for w in d.warnings)
+    assert plan_design(d, placed=True).report.color_blocks == 3   # they stay separate stops

@@ -10,9 +10,13 @@ import os
 
 import pyembroidery
 
+from .palette import parse_color
 from .svg_import import Design, DesignObject, Polyline
 
 READ_EXTENSIONS = (".pes", ".pec", ".dst", ".jef", ".exp", ".vp3", ".xxx", ".u01", ".hus")
+# chart threads that are easy to tell apart, for files with no colours (DST, EXP)
+PLACEHOLDER_THREADS = ("Black", "Red", "Blue", "Deep Gold", "Leaf Green", "Violet",
+                       "Pumpkin", "Pewter")
 
 
 def load_stitches(path: str) -> Design:
@@ -27,6 +31,7 @@ def load_stitches(path: str) -> Design:
         raise ValueError(f"{os.path.basename(path)} has no stitches")
 
     threads = pattern.threadlist or []
+    placeholders = not threads          # DST / EXP carry no colours
     objects: list[DesignObject] = []
     runs: list[list[tuple[float, float]]] = []
     current: list[tuple[float, float]] = []
@@ -39,7 +44,10 @@ def load_stitches(path: str) -> Design:
         current = []
         if runs:
             t = threads[block] if block < len(threads) else None
-            rgb = ((t.color >> 16) & 255, (t.color >> 8) & 255, t.color & 255) if t else (0, 0, 0)
+            if t is not None:
+                rgb = ((t.color >> 16) & 255, (t.color >> 8) & 255, t.color & 255)
+            else:                       # no colour in the file: a distinct placeholder thread
+                rgb = parse_color(PLACEHOLDER_THREADS[len(objects) % len(PLACEHOLDER_THREADS)])
             n = len(objects) + 1
             objects.append(DesignObject(n, f"stitches{n}", "Stitches", rgb,
                                         [Polyline(r, False) for r in runs], color=rgb,
@@ -68,4 +76,8 @@ def load_stitches(path: str) -> Design:
     warnings = []
     if not objects:
         warnings.append("No stitches found")
+    elif placeholders:
+        warnings.append(f"{os.path.splitext(path)[1].upper()[1:]} files carry no colours; "
+                        f"placeholder threads were assigned (choose the real ones with "
+                        f"Choose thread)")
     return Design(objects, warnings)
