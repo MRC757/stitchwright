@@ -1,4 +1,6 @@
 """Tests: project files and opening embroidery files."""
+import os
+
 import pyembroidery
 import pytest
 
@@ -70,3 +72,51 @@ def test_files_without_colours_get_distinct_placeholder_threads(tmp_path):
     assert len({o.source_color for o in d.objects}) == 3          # three different threads
     assert any("DST files carry no colours" in w for w in d.warnings)
     assert plan_design(d, placed=True).report.color_blocks == 3   # they stay separate stops
+
+
+def test_project_fonts_are_found_by_name_on_another_computer(tmp_path):
+    import json
+    from conftest import any_font
+    from svg2pes.document import DocError, Document
+    from svg2pes.project import load_project, save_project
+    from svg2pes.stitching import Settings
+    from svg2pes.text import TextSpec
+    name, path, idx = any_font()
+    doc = Document()
+    doc.add_text(TextSpec("Hi", path, name, idx, 8))
+    doc.add_text(TextSpec("Yo", path, "Some Font Nobody Has", idx, 8))
+    stitches = doc.plan(Settings()).plan.report.stitch_count
+    proj = str(tmp_path / "p.svg2pes")
+    save_project(proj, doc.to_project({}))
+    # pretend the project was made on a PC whose fonts lived somewhere else
+    data = json.load(open(proj, encoding="utf-8"))
+    for spec in data["texts"].values():
+        spec["font_path"] = "Z:/elsewhere/fonts/" + os.path.basename(path)
+    json.dump(data, open(proj, "w", encoding="utf-8"))
+    p = load_project(proj)
+    assert p.texts["text1"].font_path == path                  # found again by its name
+    assert p.texts["text2"].font_path.startswith("Z:/")        # not installed: kept ...
+    assert any("Some Font Nobody Has" in w for w in p.warnings)  # ... with a warning
+    other = Document()
+    other.load_project(p, proj)
+    assert other.plan(Settings()).plan.report.stitch_count == stitches   # still sews as saved
+    with pytest.raises(DocError, match="Cannot read font"):
+        other.edit_text("text2", replace_text(p.texts["text2"], "Yes"))
+
+
+def replace_text(spec, text):
+    from dataclasses import replace
+    return replace(spec, text=text)
+
+
+def test_text_dialog_falls_back_to_the_default_font(window):
+    from conftest import any_font
+    from svg2pes.dialogs import TextDialog
+    from svg2pes.text import TextSpec
+    name, path, idx = any_font()
+    dlg = TextDialog(window, 1.0, TextSpec("Hi", "Z:/missing/font.ttf", "Gone Font", 0, 8),
+                     editing=True)
+    try:
+        assert dlg.v_font.get() == name
+    finally:
+        dlg.destroy()

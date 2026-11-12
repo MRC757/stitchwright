@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 from .fill import FillSpec, SatinSpec
 from .svg_import import DesignObject, Polyline
-from .text import TextSpec
+from .text import HERSHEY_PREFIX, TextSpec, installed_fonts
 
 FORMAT = "svg2pes-project"
 VERSION = 1
@@ -92,6 +92,7 @@ def from_dict(d: dict) -> Project:
             v["color"] = tuple(v["color"])
         return FillSpec(**v)
 
+    font_warnings: list[str] = []
     objects = [_obj_from_dict(o) for o in d.get("objects", [])]
     ids = {o.obj_id for o in objects}
 
@@ -107,13 +108,29 @@ def from_dict(d: dict) -> Project:
         fills={k: fill(v) for k, v in known(d.get("fills", {})).items()},
         no_outline={k for k in d.get("no_outline", []) if k in ids},
         satins={k: SatinSpec(**v) for k, v in known(d.get("satins", {})).items()},
-        texts={k: TextSpec(**v) for k, v in known(d.get("texts", {})).items()},
+        texts={k: _portable_font(TextSpec(**v), font_warnings)
+               for k, v in known(d.get("texts", {})).items()},
         groups=known(d.get("groups", {})),
         color_order=[(int(ph), tuple(int(c) for c in rgb)) for ph, rgb in d.get("color_order", [])],
         settings=dict(d.get("settings", {})),
         source=d.get("source"),
-        warnings=list(d.get("warnings", [])),
+        warnings=list(d.get("warnings", [])) + sorted(set(font_warnings)),
     )
+
+
+def _portable_font(spec: TextSpec, warnings: list[str]) -> TextSpec:
+    """Projects store each text's font file path, which may not exist on another
+    computer: find the same font by name there. If it isn't installed, keep the path
+    (the text's stitched outlines are stored, so it still sews) and warn."""
+    if spec.font_path.startswith(HERSHEY_PREFIX) or os.path.exists(spec.font_path):
+        return spec
+    found = installed_fonts().get(spec.font_name)
+    if found:
+        return replace(spec, font_path=found[0], font_index=found[1])
+    warnings.append(f"Font '{spec.font_name or os.path.basename(spec.font_path)}' is not "
+                    f"installed here: its text still sews as saved, but editing it will use "
+                    f"another font")
+    return spec
 
 
 def save_project(path: str, p: Project) -> None:

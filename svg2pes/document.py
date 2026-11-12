@@ -539,12 +539,20 @@ class Document:
             pos += (b[k + 2] - b[k]) + gap
 
     # ------------------------------------------------------------------ text
+    @staticmethod
+    def _letters(spec: TextSpec):
+        try:
+            polys, missing = text_polylines(spec)
+        except ValueError as e:                  # e.g. the font file can't be read
+            raise DocError(str(e)) from e
+        if not polys:
+            raise DocError("That text has no letters this font can draw.")
+        return polys, missing
+
     def add_text(self, spec: TextSpec) -> tuple[str, str]:
         """Add text in the middle of the hoop, in 900 Black. Returns (id, characters
         the font couldn't draw)."""
-        polys, missing = text_polylines(spec)
-        if not polys:
-            raise DocError("That text has no letters this font can draw.")
+        polys, missing = self._letters(spec)
         self.push_undo()
         n = 1
         while self._taken(f"text{n}"):
@@ -561,9 +569,7 @@ class Document:
     def edit_text(self, oid: str, spec: TextSpec) -> str:
         """Change a text object's words or style; it stays where it is. Returns the
         characters the font couldn't draw."""
-        polys, missing = text_polylines(spec)
-        if not polys:
-            raise DocError("That text has no letters this font can draw.")
+        polys, missing = self._letters(spec)
         self.push_undo()
         o = self.text_objs[oid]
         old = [q for pl in o.polylines for q in pl.points]

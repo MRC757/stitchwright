@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import tkinter as tk
+from dataclasses import replace
 from tkinter import filedialog, ttk
 from tkinter import font as tkfont
 
@@ -15,7 +16,7 @@ from .geometry import bounds
 from .image_import import TraceSettings
 from .image_import import preview as image_preview
 from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
-from .text import TextSpec, default_font, installed_fonts, text_polylines
+from .text import HERSHEY_PREFIX, TextSpec, default_font, installed_fonts, text_polylines
 
 OK_COLOUR, WARN_COLOUR, ERROR_COLOUR = "#2e7d32", "#9a6700", "#c62828"
 SELECT_COLOUR = "#1a73e8"
@@ -144,9 +145,13 @@ class TextDialog(tk.Toplevel):
         self.names = list(self.fonts)
         self._job = None
 
+        d = default_font()
         if spec is None:
-            d = default_font()
             spec = TextSpec("", d[1] if d else "", d[0] if d else "", d[2] if d else 0)
+        elif (d and not spec.font_path.startswith(HERSHEY_PREFIX)
+              and not os.path.exists(spec.font_path)):
+            # the font isn't on this computer (e.g. a project from elsewhere): use the default
+            spec = replace(spec, font_path=d[1], font_name=d[0], font_index=d[2])
         if spec.font_name and spec.font_name not in self.fonts and spec.font_path:
             self.fonts[spec.font_name] = (spec.font_path, spec.font_index)
             self.names.append(spec.font_name)
