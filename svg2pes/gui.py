@@ -12,17 +12,21 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import replace
 import re
+import subprocess
 import sys
+import time
 import tkinter as tk
+from dataclasses import replace
 from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
 from .convert import (ConversionError, Plan, format_minutes, outside_hoop, plan_design,
                       write_pes_file)
+from . import __version__
 from .geometry import IDENTITY, Affine, apply, bounds, chain, rotate, scale, translate
+from .log import RepeatGuard, default_log_dir, log, setup_logging
 from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
 from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
 from .stitching import Settings
@@ -623,6 +627,8 @@ class App:
         self.groups: dict[str, str] = {}             # obj_id -> group id
         self.clipboard: list[dict] = []
         self.project_path: str | None = None
+        self.log_path: str | None = None
+        self._error_guard = RepeatGuard()
         self.dirty = False                           # changes since the project was saved
         self.texts: dict[str, TextSpec] = {}
         self.order_ids: list[str] = []
@@ -1058,8 +1064,35 @@ class App:
         self.m_view.add_separator()
         self.m_view.add_command(label="Sew-out: play / pause", command=self.sim_toggle)
         bar.add_cascade(label="View", menu=self.m_view)
+        m = tk.Menu(bar, tearoff=False)
+        m.add_command(label="Open log folder", command=self.open_log_folder)
+        bar.add_cascade(label="Help", menu=m)
         self.root.configure(menu=bar)
         self.menubar = bar
+
+    # ---------------------------------------------------------------- errors and the log
+    def on_exception(self, exc_type, exc, tb):
+        """Tk calls this for any error in a button or key handler. Log it and tell the
+        user, instead of failing silently (the .exe has no console)."""
+        log.error("Unexpected error", exc_info=(exc_type, exc, tb))
+        if not self._error_guard.should_show(time.monotonic()):
+            return
+        where = self.log_path or "the log file"
+        messagebox.showerror(
+            TITLE, f"Something went wrong: {exc_type.__name__}: {exc}\n\n"
+                   f"The design is unchanged; use Undo if something looks wrong.\n\n"
+                   f"Details were saved to:\n{where}", parent=self.root)
+
+    def open_log_folder(self):
+        folder = os.path.dirname(self.log_path) if self.log_path else default_log_dir()
+        os.makedirs(folder, exist_ok=True)
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", folder])
+        except OSError as e:
+            messagebox.showinfo(TITLE, f"The log folder is:\n{folder}\n\n({e})", parent=self.root)
 
     def _pick_hoop(self):
         size = HOOP_PRESETS.get(self.v_preset.get())
@@ -1262,6 +1295,7 @@ class App:
         self.mats = {i: m for i in self.order_ids}
         self.home = dict(self.mats)
         self._set_title(os.path.basename(path))
+        log.info("Opened %s (%d objects)", path, len(self.order_ids))
         self.fill_objects()
         self.refresh()
         if s < 1:
@@ -1335,6 +1369,7 @@ class App:
         self.fill_objects()
         self.tree.selection_set(new_ids)
         self.refresh()
+        log.info("Added %d object(s)", len(new_ids))
         self.set_status(f"Added {len(new_ids)} object(s). They are selected: drag them into place.")
         return new_ids
 
@@ -1372,6 +1407,7 @@ class App:
         self.project_path = path
         self.dirty = False
         self._set_title(os.path.basename(path))
+        log.info("Saved project %s (%d objects)", path, len(self.order_ids))
         self.set_status(f"Saved project {path}. Open it again with File → Open.", OK_COLOUR)
         return True
 
@@ -1409,6 +1445,7 @@ class App:
         self.svg_path = proj.source or path
         self.project_path = path
         self._set_title(os.path.basename(path))
+        log.info("Opened project %s (%d objects)", path, len(self.order_ids))
         self.fill_objects()
         self.refresh()
         self.dirty = False
@@ -1494,6 +1531,8 @@ class App:
         name = os.path.splitext(os.path.basename(path))[0]
         tip = ("  Tip: a short name without spaces is safest on the machine's USB stick."
                if " " in name or len(name) > 8 else "")
+        rep = self.plan.report
+        log.info("Wrote PES %s (%d stitches, %d colours)", path, rep.stitch_count, rep.color_blocks)
         self.set_status(f"Saved {path}.{tip}", OK_COLOUR)
 
     # ---------------------------------------------------------------- objects list
@@ -2668,7 +2707,11 @@ def main(argv: list[str] | None = None) -> int:
             root.iconphoto(True, tk.PhotoImage(file=os.path.join(assets, "icon.png")))
     except tk.TclError:
         pass  # no icon is not worth failing over
-    App(root, argv[0] if argv else None)
+    log_path = setup_logging()
+    log.info("svg2pes %s started", __version__)
+    app = App(root, argv[0] if argv else None)
+    app.log_path = log_path
+    root.report_callback_exception = app.on_exception
     root.mainloop()
     return 0
 
