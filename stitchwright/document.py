@@ -27,6 +27,7 @@ from .text import TextSpec, text_polylines
 
 RGB = tuple[int, int, int]
 UNDO_LIMIT = 100
+STITCHES_SCALE_OK = (0.8, 1.2)     # imported stitches resized beyond this get a warning
 
 
 class DocError(ValueError):
@@ -614,6 +615,28 @@ class Document:
             self.color_order = []
 
     # ------------------------------------------------------------------ planning
+    def _resized_stitches_warnings(self) -> list[str]:
+        """Warnings for imported stitches that have been resized: they are sewn point for
+        point, so their count stays the same and their spacing changes with the size."""
+        out = []
+        for oid in self.order_ids:
+            if not self.obj(oid).stitches or oid in self.skipped:
+                continue
+            a, b, c, d, _, _ = self.mats[oid]
+            sx, sy = math.hypot(a, b), math.hypot(c, d)      # turning and mirroring keep 1
+            if all(STITCHES_SCALE_OK[0] <= k <= STITCHES_SCALE_OK[1] for k in (sx, sy)):
+                continue
+            size = f"{sx:.0%}" if abs(sx - sy) < 0.005 else f"{sx:.0%} × {sy:.0%}"
+            if sx > 1 and sy > 1:
+                effect = "further apart, so the fabric may show through"
+            elif sx < 1 and sy < 1:
+                effect = "packed closer together, which can break thread and needles"
+            else:
+                effect = "spaced differently"
+            out.append(f"{oid} is imported stitches resized to {size}: they keep their "
+                       f"number, so they are now {effect}")
+        return out
+
     def build_design(self) -> tuple[Design, dict]:
         """The objects as placed in the hoop, with their choices applied, ready to plan;
         and each object's placed point lists."""
@@ -629,7 +652,7 @@ class Document:
                                      outline=oid not in self.no_outline,
                                      satin=self.satins.get(oid),
                                      stitches=o.stitches, fill_rule=o.fill_rule))
-        return Design(objs, list(self.warnings)), placed
+        return Design(objs, list(self.warnings) + self._resized_stitches_warnings()), placed
 
     def plan(self, settings: Settings) -> PlanResult:
         """Plan the stitches and check them against the sewing area."""

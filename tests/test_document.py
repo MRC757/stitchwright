@@ -27,6 +27,38 @@ def size(doc, ids):
     return round(b[2] - b[0], 6), round(b[3] - b[1], 6)
 
 
+def _stitches_doc():
+    from stitchwright.svg_import import Design, DesignObject, Polyline
+    line = Polyline([(x * 2.0, 0.0) for x in range(10)], False)
+    obj = DesignObject(1, "stitches1", "Stitches", (0, 0, 0), [line], stitches=True)
+    d = Document()
+    d.load_design(Design([obj], []), "x.pes")
+    return d
+
+
+def _resize_warnings(d):
+    return [w for w in d.build_design()[0].warnings if "resized" in w]
+
+
+@pytest.mark.parametrize("k, effect", [(1.5, "further apart"), (0.5, "closer together")])
+def test_resizing_imported_stitches_warns_about_their_spacing(k, effect):
+    from stitchwright.geometry import scale
+    d = _stitches_doc()
+    assert _resize_warnings(d) == []
+    d.transform(["stitches1"], scale(k))
+    (w,) = _resize_warnings(d)
+    assert f"{k:.0%}" in w and effect in w
+    assert any("resized" in x for x in d.plan(Settings()).plan.report.warnings)
+
+
+def test_turning_or_mirroring_imported_stitches_does_not_warn():
+    d = _stitches_doc()
+    d.rotate(["stitches1"], 90)
+    d.flip(["stitches1"], horizontal=True)
+    d.transform(["stitches1"], (1.1, 0.0, 0.0, 0.9, 0.0, 0.0))     # within 80-120%
+    assert _resize_warnings(d) == []
+
+
 def test_load_centres_the_design_and_is_unmodified(doc):
     assert doc.order_ids == ["badge", "sun", "letterF", "star", "wave"]
     assert centre(doc, doc.order_ids) == (0, 0)

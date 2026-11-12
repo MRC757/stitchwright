@@ -215,6 +215,19 @@ def test_placed_designs_are_not_moved_and_outside_is_reported(tmp_path):
     assert outside_hoop(d, (120, 100), 2) == []
 
 
+def test_long_imported_stitches_are_warned_about():
+    from stitchwright.svg_import import Design, DesignObject, Polyline
+
+    def plan(step):
+        line = Polyline([(-40.0 + i * step, 0.0) for i in range(4)], False)
+        obj = DesignObject(1, "stitches1", "Stitches", (0, 0, 0), [line], stitches=True)
+        return plan_design(Design([obj], []), placed=True).report.warnings
+
+    assert not [w for w in plan(4.0) if "mm long" in w]
+    (w,) = [w for w in plan(20.0) if "mm long" in w]
+    assert "20.0 mm" in w and "stitches1" in w
+
+
 # --- hoop check from the planned stitches ---------------------------------------------
 
 def test_satin_reaching_past_the_margin_is_flagged():

@@ -311,6 +311,7 @@ def plan_design(design: Design, choices: Choices | None = None, *,
         raise ConversionError(f"{len(blocks)} colour blocks: PES allows at most "
                               f"{MAX_COLOR_BLOCKS}. Drop --keep-order or use fewer colours.")
     pattern = build_pattern(blocks, s)
+    warnings += _long_imported_stitches(blocks)
 
     stitches = sum(1 for _, _, c in pattern.stitches if (c & 0xFF) == pyembroidery.STITCH)
     jumps = sum(1 for _, _, c in pattern.stitches if (c & 0xFF) == pyembroidery.JUMP)
@@ -356,6 +357,25 @@ def plan_design(design: Design, choices: Choices | None = None, *,
             f"{hoop_mm[0] - 2 * margin_mm:.0f} x {hoop_mm[1] - 2 * margin_mm:.0f} mm. "
             f"Turn on shrink-to-fit (--fit) or set a smaller width (--width).")
     return Plan(pattern, report)
+
+
+def _long_imported_stitches(blocks) -> list[str]:
+    """A warning if imported stitches (sewn exactly as given, never split) include any
+    longer than the machine sews well: a file can have them, or resizing makes them."""
+    longest, where = 0.0, ""
+    for blk in blocks:
+        for run in blk.runs:
+            if run.kind != "stitches":
+                continue
+            for a, b in zip(run.points, run.points[1:]):
+                d = math.dist(a, b)
+                if d > longest:
+                    longest, where = d, run.object_id
+    if longest <= MAX_STITCH_LEN + STITCH_TOLERANCE_MM:
+        return []
+    return [f"Imported stitches in {where} are up to {longest:.1f} mm long; stitches over "
+            f"{MAX_STITCH_LEN:g} mm can snag or sew loose. Make the object smaller, or check "
+            f"it on a test piece."]
 
 
 STITCH_TOLERANCE_MM = 0.1      # needle positions are stored to the nearest 0.1 mm
