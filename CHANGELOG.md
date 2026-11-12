@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 (2026-11-12)
+
+- Version tags now publish a GitHub Release with `stitchwright.exe` attached.
+- The automatic checks use the Node.js 24 versions of the GitHub actions.
+
 ## 0.2.1 (2026-11-12)
 
 - **Renamed to Stitchwright** (it was svg2pes): the package and its commands (`stitchwright`,
