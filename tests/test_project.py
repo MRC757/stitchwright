@@ -31,6 +31,27 @@ def test_project_round_trip_is_exact(tmp_path):
     assert q.color_order == p.color_order and q.settings == p.settings and q.source == SAMPLE
 
 
+def test_project_from_a_later_version_with_new_settings_still_opens():
+    from conftest import any_font
+    from stitchwright.fill import FillSpec, SatinSpec
+    from stitchwright.project import Project, from_dict, to_dict
+    from stitchwright.text import TextSpec
+    name, path, idx = any_font()
+    d = load_svg(SAMPLE)
+    ids = [o.obj_id for o in d.objects]
+    p = Project(d.objects, fills={ids[0]: FillSpec(angle=20)},
+                satins={ids[1]: SatinSpec(width=2.5)},
+                texts={ids[2]: TextSpec("Hi", path, name, idx, 12.0)})
+    data = to_dict(p)
+    data["fills"][ids[0]]["sparkle"] = True          # settings a later version might add
+    data["satins"][ids[1]]["taper"] = 0.5
+    data["texts"][ids[2]]["kerning"] = "auto"
+    q = from_dict(data)
+    assert q.fills[ids[0]].angle == 20
+    assert q.satins[ids[1]].width == 2.5
+    assert q.texts[ids[2]].text == "Hi" and q.texts[ids[2]].height_mm == 12.0
+
+
 def test_bad_project_file_is_refused(tmp_path):
     from stitchwright.project import load_project
     f = tmp_path / "bad.stitchwright"

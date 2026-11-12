@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 
 from .fill import FillSpec, SatinSpec
 from .svg_import import DesignObject, Polyline
@@ -42,14 +42,18 @@ class Project:
     warnings: list = field(default_factory=list)
 
 
-def _r(v: float) -> float:
-    return float(v)          # exact: JSON round-trips floats precisely
+def _known_fields(cls, v: dict) -> dict:
+    """Only the keys cls has: a project saved by a later version, which added a
+    setting, still opens here (the new setting is left out)."""
+    names = {f.name for f in fields(cls)}
+    return {k: x for k, x in v.items() if k in names}
 
 
 def _obj_to_dict(o: DesignObject) -> dict:
+    # floats are written exactly: JSON round-trips them precisely
     return {"index": o.index, "id": o.obj_id, "kind": o.kind,
             "source_color": list(o.source_color), "stitches": o.stitches,
-            "polylines": [{"closed": pl.closed, "points": [[_r(x), _r(y)] for x, y in pl.points]}
+            "polylines": [{"closed": pl.closed, "points": [[float(x), float(y)] for x, y in pl.points]}
                           for pl in o.polylines]}
 
 
@@ -92,7 +96,7 @@ def from_dict(d: dict) -> Project:
         raise ValueError("This project was saved by a newer Stitchwright; please update")
 
     def fill(v):
-        v = dict(v)
+        v = _known_fields(FillSpec, v)
         if v.get("color") is not None:
             v["color"] = tuple(v["color"])
         return FillSpec(**v)
@@ -112,8 +116,9 @@ def from_dict(d: dict) -> Project:
         skipped={k for k in d.get("skipped", []) if k in ids},
         fills={k: fill(v) for k, v in known(d.get("fills", {})).items()},
         no_outline={k for k in d.get("no_outline", []) if k in ids},
-        satins={k: SatinSpec(**v) for k, v in known(d.get("satins", {})).items()},
-        texts={k: _portable_font(TextSpec(**v), font_warnings)
+        satins={k: SatinSpec(**_known_fields(SatinSpec, v))
+                for k, v in known(d.get("satins", {})).items()},
+        texts={k: _portable_font(TextSpec(**_known_fields(TextSpec, v)), font_warnings)
                for k, v in known(d.get("texts", {})).items()},
         groups=known(d.get("groups", {})),
         color_order=[(int(ph), tuple(int(c) for c in rgb)) for ph, rgb in d.get("color_order", [])],
