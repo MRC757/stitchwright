@@ -75,6 +75,46 @@ def test_every_shortcut_is_bound_in_both_cases(app):
             assert app.root.bind_all(f"<Control-{key}>"), key
 
 
+def test_title_marks_unsaved_changes(app, tmp_path, monkeypatch):
+    from stitchwright.geometry import translate
+    app.open(SAMPLE)
+    assert app.root.title() == "sample.svg – Stitchwright"
+    app.apply_transform(translate(5, 0))
+    assert app.root.title() == "• sample.svg – Stitchwright"
+    proj = str(tmp_path / "p.stitchwright")
+    monkeypatch.setattr(gui.filedialog, "asksaveasfilename", lambda **k: proj)
+    assert app.save_project()
+    assert app.root.title() == "p.stitchwright – Stitchwright"
+    app.v_margin.set("3")                      # a setting saved in the project
+    assert app.root.title().startswith("• ")
+    app.open(proj)
+    assert not app.root.title().startswith("• ")
+
+
+def test_opening_a_project_selects_its_hoop_preset(app, tmp_path, monkeypatch):
+    app.open(SAMPLE)
+    app.v_hoop_w.set("130")
+    app.v_hoop_h.set("180")
+    proj = str(tmp_path / "p.stitchwright")
+    monkeypatch.setattr(gui.filedialog, "asksaveasfilename", lambda **k: proj)
+    assert app.save_project()
+    app.v_preset.set(next(iter(gui.HOOP_PRESETS)))
+    app.open(proj)
+    assert app.v_preset.get() == "5 × 7 in (130 × 180 mm)"
+    app.v_hoop_w.set("123")
+    assert app._preset_for_hoop() == "Custom"
+
+
+def test_save_pes_says_why_it_cannot_save(app):
+    app.save()
+    assert "Nothing to save" in app.v_status.get()
+    app.open(SAMPLE)
+    app.v_stitch.set("0.1")                    # refused by the planner
+    app.refresh()
+    app.save()
+    assert app.v_status.get().startswith("Can't save the PES yet: Stitch length")
+
+
 def _red_square_png(tmp_path):
     from PIL import Image, ImageDraw
     img = Image.new("RGB", (60, 60), "white")

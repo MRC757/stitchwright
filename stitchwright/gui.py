@@ -68,6 +68,8 @@ class App:
         self._error_guard = RepeatGuard()
         self.placed: dict[str, list[list[tuple[float, float]]]] = {}
         self.plan: Plan | None = None
+        self.plan_error = ""                  # why there is no plan, for Save to explain
+        self._title_name: str | None = None   # file name shown in the title bar
         self.outside: list[str] = []
         self.outside_stitches_only: list[str] = []
         self.px, self.origin = 1.0, (0.0, 0.0)
@@ -507,7 +509,8 @@ class App:
         where = self.log_path or "the log file"
         messagebox.showerror(
             TITLE, f"Something went wrong: {exc_type.__name__}: {exc}\n\n"
-                   f"The design is unchanged; use Undo if something looks wrong.\n\n"
+                   f"The design may have been partly changed; if something looks wrong, "
+                   f"Undo (Ctrl+Z) puts it back.\n\n"
                    f"Details were saved to:\n{where}", parent=self.root)
 
     def open_log_folder(self):
@@ -616,6 +619,7 @@ class App:
                 self.tree.selection_remove(self.tree.selection())
         self.refresh()
         self._undo_buttons()
+        self._update_title()
 
     def _doc_error(self, e: DocError):
         self.set_status(str(e), WARN_COLOUR)
@@ -688,8 +692,17 @@ class App:
                             "change its size.", WARN_COLOUR)
 
     def _set_title(self, name: str):
+        self._title_name = name
         self.l_file.configure(text=name)
-        self.root.title(f"{name} – {TITLE}")
+        self._update_title()
+
+    def _update_title(self):
+        """The title bar: the file name, marked with • while there are unsaved changes."""
+        if self._title_name is None:
+            self.root.title(TITLE)
+            return
+        mark = "• " if self.doc.dirty and self.doc.order_ids else ""
+        self.root.title(f"{mark}{self._title_name} – {TITLE}")
 
     def new_design(self, confirm: bool = True):
         if confirm and not self._confirm_discard():
@@ -788,10 +801,23 @@ class App:
             self._read_hoop()
         except ValueError:
             pass
+        self.v_preset.set(self._preset_for_hoop())
         self._set_title(os.path.basename(path))
         log.info("Opened project %s (%d objects)", path, len(self.doc.order_ids))
         self.sync()
         self.doc.mark_saved()           # setting the variables above isn't a change
+        self._update_title()
+
+    def _preset_for_hoop(self) -> str:
+        """The hoop preset matching the hoop size boxes, or "Custom"."""
+        try:
+            size = (float(self.v_hoop_w.get()), float(self.v_hoop_h.get()))
+        except ValueError:
+            return "Custom"
+        for name, preset in HOOP_PRESETS.items():
+            if size == preset:
+                return name
+        return "Custom"
 
     def _confirm_discard(self) -> bool:
         """True if it's fine to throw away the current design (asks to save changes)."""
@@ -858,11 +884,18 @@ class App:
         if self._job is not None:            # settings changed moments ago: re-plan first
             self.root.after_cancel(self._job)
             self.refresh()
-        if self.plan is None or self.outside:
-            if self.outside:
-                messagebox.showwarning(TITLE, "Part of the design is outside the sewing area. "
-                                       "Move or shrink it first (Arrange → Fit to hoop).",
-                                       parent=self.root)
+        if self.plan is None:
+            if not self.doc.order_ids:
+                self.set_status("Nothing to save yet: open a design or add text first.",
+                                WARN_COLOUR)
+            else:
+                self.set_status(f"Can't save the PES yet: {self.plan_error or 'the design has '
+                                'no stitches.'}", ERROR_COLOUR)
+            return
+        if self.outside:
+            messagebox.showwarning(TITLE, "Part of the design is outside the sewing area. "
+                                   "Move or shrink it first (Arrange → Fit to hoop).",
+                                   parent=self.root)
             return
         if self.doc.svg_path:
             stem, folder = os.path.splitext(os.path.basename(self.doc.svg_path))[0], os.path.dirname(self.doc.svg_path)
@@ -1378,6 +1411,7 @@ class App:
         """A Stitching-tab setting changed: it's saved in the project, so the design now
         has unsaved changes (opening a project sets these too, then clears the flag)."""
         self.doc.mark_changed()
+        self._update_title()
         if replan:
             self.schedule()
 
@@ -1408,6 +1442,7 @@ class App:
                              self.doc.build_design()[1])
         self.placed = res.placed
         self.plan = res.plan
+        self.plan_error = res.error
         self.outside, self.outside_stitches_only = res.outside, res.outside_stitches_only
         self.track = Track(res.plan.pattern) if res.plan else Track()
         self.sim_reset()
