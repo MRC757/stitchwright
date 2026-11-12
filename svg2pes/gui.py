@@ -18,12 +18,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
-from pyembroidery import EmbPattern
 
 from .convert import ConversionError, Plan, outside_hoop, plan_design, write_pes_file
 from .geometry import IDENTITY, Affine, apply, bounds, chain, rotate, scale, translate
 from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
-from .preview import BACKGROUND, render_image
+from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
 from .stitching import Settings
 from .svg_import import Design, DesignObject, Polyline, load_svg
 from .text import TextSpec, default_font, installed_fonts, text_polylines
@@ -32,6 +31,10 @@ TITLE = "svg2pes – SVG to Brother PES"
 OK_COLOUR, WARN_COLOUR, ERROR_COLOUR = "#2e7d32", "#9a6700", "#c62828"
 SELECT_COLOUR = "#1a73e8"
 SHIFT, CONTROL = 0x0001, 0x0004
+SIM_SPEEDS = {"Slow": 15, "Normal": 60, "Fast": 250, "Very fast": 1200}   # stitches per second
+SIM_FRAME_MS = 33
+NEEDLE_COLOUR = "#d32f2f"
+MAX_ZOOM = 60.0
 TEXT_WIDGETS = ("Entry", "TEntry", "Text", "TCombobox", "TSpinbox", "Spinbox")
 
 
@@ -345,6 +348,24 @@ class App:
         self.v_keep = tk.BooleanVar(value=False)
         self.v_pes = tk.StringVar(value="1")
         self.v_jumps = tk.BooleanVar(value=True)
+        self.v_dots = tk.BooleanVar(value=True)
+        # zoom / pan: zoom 1 = whole hoop fits; view_c = hoop mm shown at the canvas centre
+        self.zoom = 1.0
+        self.view_c = (0.0, 0.0)
+        self._pan = None
+        self._hq_job = None
+        # sew-out simulation: sim_pos None = show everything, else entries sewn so far
+        self.track = Track()
+        self.sim_pos: int | None = None
+        self.sim_playing = False
+        self._sim_job = None
+        self._sim_acc = 0.0
+        self._sim_img = None          # 1x image being drawn on during playback
+        self._sim_drawn = 0
+        self.v_sim = tk.DoubleVar(value=0)
+        self._slide_lock = False
+        self.v_speed = tk.StringVar(value="Normal")
+        self.v_stop_change = tk.BooleanVar(value=True)
         self.v_status = tk.StringVar()
         self.v_w, self.v_h = tk.StringVar(), tk.StringVar()
         self.v_x, self.v_y = tk.StringVar(), tk.StringVar()
@@ -353,6 +374,7 @@ class App:
         for v in (self.v_hoop_w, self.v_hoop_h, self.v_margin, self.v_stitch, self.v_keep):
             v.trace_add("write", lambda *a: self.schedule())
         self.v_jumps.trace_add("write", lambda *a: self.draw_preview())
+        self.v_dots.trace_add("write", lambda *a: self.draw_preview())
 
         self._build()
         self.set_status("Open an SVG (Ctrl+O) or add text (Ctrl+T) to start.")
@@ -363,8 +385,14 @@ class App:
     def _build(self):
         r, ui = self.root, self.ui
         r.title(TITLE)
-        r.geometry(f"{int(1200 * ui)}x{int(780 * ui)}")
-        r.minsize(int(940 * ui), int(620 * ui))
+        # Fit the screen (leaving room for the taskbar); maximise if the full size won't fit.
+        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+        want_w, want_h = int(1200 * ui), int(820 * ui)
+        w, h = min(want_w, sw - 40), min(want_h, sh - 100)
+        r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2 - 30)}")
+        r.minsize(min(int(900 * ui), sw - 40), min(int(560 * ui), sh - 100))
+        if sys.platform == "win32" and (w < want_w or h < want_h):
+            r.state("zoomed")
         style = ttk.Style(r)
         style.configure("Treeview", rowheight=int(22 * ui))
 
@@ -520,7 +548,7 @@ class App:
         self.order.pack(fill="both", expand=True)
 
         # Preview -----------------------------------------------------------
-        self.canvas = tk.Canvas(right, bg=to_hex(BACKGROUND), highlightthickness=1,
+        self.canvas = tk.Canvas(right, bg=to_hex(OUTSIDE), highlightthickness=1,
                                 highlightbackground="#cccccc", takefocus=1)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self._schedule_draw())
@@ -534,11 +562,48 @@ class App:
             self.canvas.bind(f"<Shift-{key}>", lambda e, dx=dx, dy=dy: self.nudge(dx, dy, e))
         self.canvas.bind("<Delete>", lambda e: self.delete_selected())
         self.canvas.bind("<space>", lambda e: self.toggle_skip())
+        # zoom and pan
+        self.canvas.bind("<MouseWheel>", self.on_wheel)
+        self.canvas.bind("<Button-4>", lambda e: self.zoom_at(1.25, e.x, e.y))   # Linux
+        self.canvas.bind("<Button-5>", lambda e: self.zoom_at(0.8, e.x, e.y))
+        for b in (2, 3):
+            self.canvas.bind(f"<ButtonPress-{b}>", self.pan_start)
+            self.canvas.bind(f"<B{b}-Motion>", self.pan_move)
+            self.canvas.bind(f"<ButtonRelease-{b}>", self.pan_end)
+        for key in ("plus", "equal", "KP_Add"):
+            self.canvas.bind(f"<KeyPress-{key}>", lambda e: self.zoom_step(1.5))
+        for key in ("minus", "KP_Subtract"):
+            self.canvas.bind(f"<KeyPress-{key}>", lambda e: self.zoom_step(1 / 1.5))
+        self.canvas.bind("<KeyPress-0>", lambda e: self.zoom_fit())
+        self.canvas.bind("<Home>", lambda e: self.zoom_fit())
+
         under = ttk.Frame(right)
         under.pack(fill="x", pady=(6, 0))
         self.l_info = ttk.Label(under, text="")
         self.l_info.pack(side="left")
-        ttk.Checkbutton(under, text="Show jumps", variable=self.v_jumps).pack(side="right")
+        ttk.Checkbutton(under, text="Needle points", variable=self.v_dots).pack(side="right")
+        ttk.Checkbutton(under, text="Show jumps", variable=self.v_jumps).pack(side="right", padx=8)
+        ttk.Button(under, text="Fit", width=4, command=self.zoom_fit).pack(side="right", padx=(0, 8))
+        ttk.Button(under, text="+", width=3, command=lambda: self.zoom_step(1.5)).pack(side="right")
+        self.l_zoom = ttk.Label(under, text="100%", width=6, anchor="center")
+        self.l_zoom.pack(side="right")
+        ttk.Button(under, text="−", width=3, command=lambda: self.zoom_step(1 / 1.5)).pack(side="right")
+
+        sim = ttk.Frame(right)
+        sim.pack(fill="x", pady=(4, 0))
+        ttk.Button(sim, text="⏮", width=3, command=self.sim_start).pack(side="left")
+        self.b_play = ttk.Button(sim, text="▶ Sew", width=8, command=self.sim_toggle)
+        self.b_play.pack(side="left", padx=3)
+        ttk.Button(sim, text="⏭", width=3, command=self.sim_end).pack(side="left")
+        self.s_sim = ttk.Scale(sim, from_=0, to=1, variable=self.v_sim, command=self._on_slide)
+        self.s_sim.pack(side="left", fill="x", expand=True, padx=8)
+        ttk.Combobox(sim, textvariable=self.v_speed, values=list(SIM_SPEEDS), state="readonly",
+                     width=9).pack(side="left")
+        ttk.Checkbutton(sim, text="Stop at colour changes",
+                        variable=self.v_stop_change).pack(side="left", padx=(8, 0))
+        self.l_sim = ttk.Label(right, text="Sew-out: press ▶ Sew to watch the design being "
+                                           "stitched in order.", foreground="#555555")
+        self.l_sim.pack(fill="x", pady=(2, 0))
 
         r.bind_all("<Control-o>", lambda e: self._main_key(e, self.ask_open))
         r.bind_all("<Control-s>", lambda e: self._main_key(e, self.save))
@@ -1190,6 +1255,8 @@ class App:
         self.placed = {}
         if not self.order_ids:
             self.plan = None
+            self.track = Track()
+            self.sim_reset()
             self.b_save.configure(state="disabled")
             self.fill_order()
             self.l_info.configure(text="")
@@ -1216,6 +1283,8 @@ class App:
         except ConversionError as e:
             plan, err = None, str(e)
         self.plan = plan
+        self.track = Track(plan.pattern) if plan else Track()
+        self.sim_reset()
         self.outside = outside_hoop(design, self.hoop, self.margin) if plan else []
         self.fill_order()
         self.update_arrange_fields()
@@ -1260,8 +1329,21 @@ class App:
             self.root.after_cancel(self._draw_job)
         self._draw_job = self.root.after(80, self.draw_preview)
 
-    def draw_preview(self):
+    def _style(self) -> Style:
+        return Style(show_jumps=self.v_jumps.get(), needle_points=self.v_dots.get())
+
+    def _view(self, ss: int) -> View:
+        x0, y0 = self.from_canvas(0, 0)
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        return View(x0, y0, self.px * ss, cw * ss, ch * ss, ss)
+
+    def draw_preview(self, fast: bool = False):
+        """Redraw the preview. fast=True draws without smoothing (used while
+        zooming, panning and playing) and schedules a smooth redraw afterwards."""
         self._draw_job = None
+        if self._hq_job is not None:
+            self.root.after_cancel(self._hq_job)
+            self._hq_job = None
         cv = self.canvas
         cv.delete("all")
         self.handles = {}
@@ -1273,19 +1355,228 @@ class App:
                            fill="#777777", font=("Segoe UI", 11))
             return
         hw, hh = self.hoop
-        self.px = max(0.5, min((cw - 24) / hw, (ch - 24) / hh))
-        self.origin = (cw / 2, ch / 2)
-        pattern = self.plan.pattern if self.plan else EmbPattern()
-        # draw at 2x and shrink, which smooths the lines
-        big = render_image(pattern, self.hoop, self.px * 2, self.margin, self.v_jumps.get())
-        img = big.resize((max(1, round(hw * self.px)), max(1, round(hh * self.px))), Image.LANCZOS)
+        self.px = max(0.2, min((cw - 24) / hw, (ch - 24) / hh)) * self.zoom
+        vx, vy = self.view_c
+        self.origin = (cw / 2 - vx * self.px, ch / 2 - vy * self.px)
+        self.l_zoom.configure(text=f"{self.zoom:.0%}")
+        ss = 1 if (fast or self.sim_playing) else 2      # 2x then shrink smooths the lines
+        img = render_view(self.track, self._view(ss), self.hoop, self.margin, self._style(),
+                          self.sim_pos)
+        if ss > 1:
+            img = img.resize((cw, ch), Image.LANCZOS)
+        else:
+            self._sim_img, self._sim_drawn = img, len(self.track) if self.sim_pos is None else self.sim_pos
         self._photo = ImageTk.PhotoImage(img, master=self.root)
-        cv.create_image(cw / 2, ch / 2, image=self._photo)
+        cv.create_image(0, 0, anchor="nw", image=self._photo, tags="image")
         for oid in self.outside:                       # mark what sticks out in red
             for pts in self.placed.get(oid, []):
                 cv.create_line(*[c for x, y in pts for c in self.to_canvas(x, y)],
                                fill=ERROR_COLOUR, width=1, dash=(3, 2))
+        self.draw_needle()
         self.draw_overlay()
+        if fast and not self.sim_playing:
+            self._hq_job = self.root.after(220, self.draw_preview)
+
+    # ---------------------------------------------------------------- zoom and pan
+    def zoom_at(self, factor: float, cx: float, cy: float):
+        """Zoom by factor, keeping the point under canvas (cx, cy) still."""
+        new = max(0.5, min(MAX_ZOOM, self.zoom * factor))
+        if abs(new - self.zoom) < 1e-9 or not self.order_ids:
+            return
+        mx, my = self.from_canvas(cx, cy)
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        self.zoom = new
+        px = max(0.2, min((cw - 24) / self.hoop[0], (ch - 24) / self.hoop[1])) * new
+        self.view_c = (mx - (cx - cw / 2) / px, my - (cy - ch / 2) / px)
+        self.draw_preview(fast=True)
+
+    def zoom_step(self, factor: float):
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        self.zoom_at(factor, cw / 2, ch / 2)
+        return "break"
+
+    def zoom_fit(self):
+        self.zoom, self.view_c = 1.0, (0.0, 0.0)
+        self.draw_preview()
+        return "break"
+
+    def on_wheel(self, e):
+        self.zoom_at(1.25 if e.delta > 0 else 0.8, e.x, e.y)
+        return "break"
+
+    def pan_start(self, e):
+        self._pan = (e.x, e.y, self.view_c)
+        self.canvas.configure(cursor="fleur")
+
+    def pan_move(self, e):
+        if self._pan:
+            sx, sy, (vx, vy) = self._pan
+            self.view_c = (vx - (e.x - sx) / self.px, vy - (e.y - sy) / self.px)
+            self.draw_preview(fast=True)
+
+    def pan_end(self, e):
+        self._pan = None
+        self.canvas.configure(cursor="")
+
+    # ---------------------------------------------------------------- sew-out simulation
+    def _thread_label(self, ci: int) -> str:
+        tmap = self.plan.report.thread_map if self.plan else []
+        if 0 <= ci < len(tmap):
+            tu = tmap[ci]
+            return f"{tu.thread.number} {tu.thread.name}" if tu.thread else to_hex(tu.rgb)
+        return ""
+
+    def sim_reset(self):
+        """Back to showing the whole design (called whenever the design changes)."""
+        self.sim_pause()
+        self.sim_pos = None
+        n = len(self.track)
+        self.s_sim.configure(to=max(1, n))
+        self._set_slider(n)
+        self._update_sim_label()
+
+    def _update_sim_label(self):
+        t = self.track
+        n = len(t)
+        if not n:
+            self.l_sim.configure(text="Sew-out: nothing to sew yet.")
+            return
+        blocks = (t.colour[-1] + 1) if n else 0
+        if self.sim_pos is None:
+            self.l_sim.configure(text=f"Sew-out: {t.total_stitches} stitches in {blocks} colour(s). "
+                                      "Press ▶ Sew to watch it stitched in order.   "
+                                      "Scroll to zoom, right-drag to pan.")
+            return
+        i = max(0, self.sim_pos - 1)
+        sewn = t.stitch_no[i] if self.sim_pos else 0
+        ci = t.colour[i] if self.sim_pos else 0
+        self.l_sim.configure(text=f"Stitch {sewn} of {t.total_stitches}   ·   colour {ci + 1} of "
+                                  f"{blocks}: {self._thread_label(ci)}")
+
+    def draw_needle(self):
+        cv = self.canvas
+        cv.delete("needle")
+        if self.sim_pos is None or not len(self.track):
+            return
+        i = max(0, min(self.sim_pos, len(self.track)) - 1)
+        x, y = self.to_canvas(self.track.x[i], self.track.y[i])
+        r = 7 * self.ui
+        cv.create_oval(x - r, y - r, x + r, y + r, outline=NEEDLE_COLOUR, width=2, tags="needle")
+        cv.create_line(x - 2 * r, y, x - r / 2, y, fill=NEEDLE_COLOUR, width=2, tags="needle")
+        cv.create_line(x + r / 2, y, x + 2 * r, y, fill=NEEDLE_COLOUR, width=2, tags="needle")
+        cv.create_line(x, y - 2 * r, x, y - r / 2, fill=NEEDLE_COLOUR, width=2, tags="needle")
+        cv.create_line(x, y + r / 2, x, y + 2 * r, fill=NEEDLE_COLOUR, width=2, tags="needle")
+
+    def _set_sim_pos(self, pos: int, smooth: bool):
+        n = len(self.track)
+        self.sim_pos = max(0, min(pos, n))
+        self._set_slider(self.sim_pos)
+        self._update_sim_label()
+        if smooth or self._sim_img is None or self.sim_pos < self._sim_drawn:
+            self.draw_preview(fast=not smooth)
+            return
+        # playing forward: draw only the new stitches onto the current image
+        draw_track(self._sim_img, self.track, self._view(1), self._sim_drawn, self.sim_pos,
+                   self._style())
+        self._sim_drawn = self.sim_pos
+        try:
+            self._photo.paste(self._sim_img)
+        except (ValueError, tk.TclError):         # canvas was resized: redraw instead
+            self.draw_preview(fast=True)
+            return
+        self.draw_needle()
+
+    def _set_slider(self, value):
+        """Move the slider from code without it counting as the user dragging it."""
+        self._slide_lock = True
+        try:
+            self.v_sim.set(value)
+        finally:
+            self._slide_lock = False
+
+    def _on_slide(self, value):
+        if self._slide_lock or not len(self.track):
+            return
+        pos = int(float(value))
+        if pos != self.sim_pos:
+            self._set_sim_pos(pos, smooth=not self.sim_playing)
+
+    def sim_toggle(self):
+        if self.sim_playing:
+            self.sim_pause()
+            self.draw_preview()
+        else:
+            self.sim_play()
+
+    def sim_play(self):
+        if not len(self.track):
+            return
+        if self.sim_pos is None or self.sim_pos >= len(self.track):
+            self.sim_pos = 0
+        self.sim_playing = True
+        self._sim_acc = 0.0
+        self.b_play.configure(text="⏸ Pause")
+        self.draw_preview(fast=True)
+        self._sim_job = self.root.after(SIM_FRAME_MS, self._sim_tick)
+
+    def sim_pause(self):
+        self.sim_playing = False
+        if self._sim_job is not None:
+            self.root.after_cancel(self._sim_job)
+            self._sim_job = None
+        if hasattr(self, "b_play"):
+            self.b_play.configure(text="▶ Sew")
+
+    def sim_start(self):
+        self.sim_pause()
+        if len(self.track):
+            self._set_sim_pos(0, smooth=True)
+
+    def sim_end(self):
+        self.sim_pause()
+        self.sim_pos = None
+        self._set_slider(len(self.track))
+        self._update_sim_label()
+        self.draw_preview()
+
+    def _sim_tick(self):
+        self._sim_job = None
+        if not self.sim_playing:
+            return
+        t = self.track
+        n = len(t)
+        self._sim_acc += SIM_SPEEDS.get(self.v_speed.get(), 60) * SIM_FRAME_MS / 1000
+        budget = int(self._sim_acc)            # stitches to sew this frame
+        if budget == 0:                        # slow speeds: not every frame sews one
+            self._sim_job = self.root.after(SIM_FRAME_MS, self._sim_tick)
+            return
+        self._sim_acc -= budget
+        pos = self.sim_pos or 0
+        goal = (t.stitch_no[pos - 1] if pos else 0) + budget
+        stopped_at = None
+        while pos < n:
+            if t.kind[pos] == CHANGE and pos > 0 and self.v_stop_change.get():
+                stopped_at = pos
+                pos += 1
+                break
+            pos += 1
+            if t.stitch_no[pos - 1] >= goal:
+                break
+        self._set_sim_pos(pos, smooth=False)
+        if stopped_at is not None:
+            self.sim_pause()
+            self.draw_preview()
+            self.set_status(f"Colour change: put on thread {self._thread_label(t.colour[stopped_at])}, "
+                            "then press ▶ Sew to carry on.", WARN_COLOUR)
+            return
+        if pos >= n:
+            self.sim_pause()
+            self.draw_preview()
+            changes = t.colour[-1] if n else 0
+            self.set_status(f"Sew-out finished: {t.total_stitches} stitches, {changes} colour "
+                            f"change(s).", OK_COLOUR)
+            return
+        self._sim_job = self.root.after(SIM_FRAME_MS, self._sim_tick)
 
     def draw_overlay(self, m: Affine | None = None):
         """Selection box and handles; with m, the selection as it would look after m."""

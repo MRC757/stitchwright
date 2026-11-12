@@ -362,3 +362,33 @@ def test_bad_font_is_a_clear_error(tmp_path):
     bad.write_bytes(b"not a font")
     with pytest.raises(ValueError, match="Cannot read font"):
         text_polylines(TextSpec("A", str(bad)))
+
+
+# --- stitch preview and sew-out ----------------------------------------------
+
+def test_track_follows_the_sewing_order():
+    from svg2pes.preview import CHANGE, SEW, Track
+    plan = plan_design(load_svg(SAMPLE))
+    t = Track(plan.pattern)
+    assert t.total_stitches == plan.report.stitch_count
+    assert t.kind.count(CHANGE) == plan.report.color_blocks - 1
+    assert t.stitch_no[-1] == t.total_stitches
+    assert t.colour[-1] == plan.report.color_blocks - 1
+    i = t.kind.index(SEW, 5)                       # a sewn entry starts where the needle was
+    assert (t.fx[i], t.fy[i]) == (t.x[i - 1], t.y[i - 1])
+
+
+def test_render_view_zoomed_and_partly_sewn():
+    from svg2pes.preview import BACKGROUND, GHOST, Style, Track, View, render_view
+    plan = plan_design(load_svg(SAMPLE))
+    t = Track(plan.pattern)
+    whole = View(-50, -50, 4, 400, 400)
+    full = render_view(t, whole, (100, 100))
+    half = render_view(t, whole, (100, 100), upto=len(t) // 2)
+    colours_full = {c for _, c in full.getcolors(1 << 20)}
+    colours_half = {c for _, c in half.getcolors(1 << 20)}
+    assert GHOST in colours_half and GHOST not in colours_full
+    # a 20x zoom on a 10 mm square still renders at the requested size, with needle dots
+    zoomed = render_view(t, View(-30, -20, 80, 800, 800), (100, 100), style=Style())
+    assert zoomed.size == (800, 800)
+    assert BACKGROUND in {c for _, c in zoomed.getcolors(1 << 20)}

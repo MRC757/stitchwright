@@ -22,6 +22,8 @@ Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Milestone 1 se
 - Lets you move, resize and rotate objects in the hoop, by dragging in the preview or by
   typing sizes, positions and angles. Undo and redo are included.
 - Adds text in any installed font, sewn as letter outlines.
+- Shows the real stitches: zoom in to see each stitch and needle point, or watch a sew-out
+  simulation that stitches the design in machine order and stops at each colour change.
 - Checks that everything fits inside the hoop and its margin, and checks each saved file by
   reading it back.
 - Comes with a desktop window and a command line. Both use the same conversion code.
@@ -82,9 +84,27 @@ macOS.
    it to edit, or press **Delete text** to remove it.
 5. Check the **Stitching** tab (hoop, margin, stitch length) and the **Sewing order** tab (one
    row per thread change on the machine).
-6. **Save PES…** (Ctrl+S). It suggests a short file name without spaces for the USB stick.
+6. **Check the stitches** (see below), then **Save PES…** (Ctrl+S). It suggests a short file
+   name without spaces for the USB stick.
 
 Undo and Redo (Ctrl+Z / Ctrl+Y) cover every change in the window.
+
+### Looking at the stitches
+
+The preview is drawn from the stitches that will be saved, not from the SVG.
+
+- **Zoom:** scroll the mouse wheel over the preview to zoom in on the point under the
+  pointer, or use **−** / **+** (keys `-` / `+`). Right-drag or middle-drag to pan.
+  **Fit** (key `0`) shows the whole hoop again. Zoomed in, stitches are drawn about as thick
+  as real thread, with a dot at each needle point (turn the dots off with **Needle
+  points**). Thin pink lines are jumps (**Show jumps**).
+- **Sew-out:** press **▶ Sew** to watch the design stitched in the order the machine will sew
+  it. A red marker shows the needle, and the parts not sewn yet are shown faintly.
+  - Choose the speed from the list next to the slider. Drag the slider to jump to any point.
+  - **⏮** goes back to the start, and **⏭** shows the finished design.
+  - With *Stop at colour changes* ticked, playback pauses at each thread change, like the
+    machine, and names the next thread. Press **▶ Sew** to carry on.
+  - Zooming and panning work while it plays.
 
 ## Using the command line
 
@@ -150,7 +170,7 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 | `svg2pes/convert.py` | sizing, colour choices, stitch planning, PES writing and checking |
 | `svg2pes/geometry.py` | move, resize and rotate transforms |
 | `svg2pes/text.py` | text to outlines with installed fonts |
-| `svg2pes/preview.py` | draws the stitch preview |
+| `svg2pes/preview.py` | draws the stitch preview (whole hoop or zoomed) and the sew-out |
 | `svg2pes/gui.py` | the Tkinter window |
 | `svg2pes/cli.py` | the command line |
 | `svg2pes/assets/` | app icon |
