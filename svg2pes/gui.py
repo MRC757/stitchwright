@@ -509,12 +509,21 @@ class App:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if sys.platform == "win32":
-        try:  # crisp text on high-DPI screens
+        try:
             import ctypes
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)        # crisp text on high-DPI screens
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("svg2pes")  # own taskbar icon
         except (AttributeError, OSError):
             pass
     root = tk.Tk()
+    assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    try:
+        if sys.platform == "win32":
+            root.iconbitmap(default=os.path.join(assets, "icon.ico"))
+        else:
+            root.iconphoto(True, tk.PhotoImage(file=os.path.join(assets, "icon.png")))
+    except tk.TclError:
+        pass  # no icon is not worth failing over
     App(root, argv[0] if argv else None)
     root.mainloop()
     return 0

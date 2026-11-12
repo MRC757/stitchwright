@@ -23,7 +23,22 @@ Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Milestone 1 se
   after saving by reading it back.
 - Comes with a desktop window and a command line. Both use the same conversion code.
 
-## Install
+## Windows app (.exe)
+
+`svg2pes.exe` is a single file that runs without Python installed. Double-click it, or drag
+an SVG onto it to open that file straight away. The first launch takes a few seconds while
+it unpacks.
+
+To build it yourself, run this in PowerShell from the project folder:
+
+    .\build_exe.ps1
+
+The script creates its own build environment (`.venv-build`), runs the tests, and writes
+`dist\svg2pes.exe`. If PowerShell blocks scripts, run
+`powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`. Unsigned PyInstaller apps sometimes
+trigger a Windows SmartScreen or antivirus warning. If so, choose *More info → Run anyway*.
+
+## Install from source
 
 Needs Python 3.10 or newer. Tkinter, which the window uses, comes with Python on Windows and
 macOS.
@@ -106,6 +121,8 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 | `svg2pes/preview.py` | draws the stitch preview |
 | `svg2pes/gui.py` | the Tkinter window |
 | `svg2pes/cli.py` | the command line |
+| `svg2pes/assets/` | app icon |
+| `svg2pes.spec`, `build_exe.ps1`, `version_info.txt` | Windows .exe build |
 
 ## Tests
 
