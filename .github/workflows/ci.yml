@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    # Windows: some tests open small Tk windows and the text tests need fonts (Arial)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: pyflakes
+        run: python -m pyflakes svg2pes tests
+      - name: Tests
+        run: python -m pytest -q
+
+  build-exe:
+    # on version tags (v0.2.0, ...): build the Windows app and keep it as an artifact
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build svg2pes.exe
+        shell: pwsh
+        run: ./build_exe.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: svg2pes-exe
+          path: dist/svg2pes.exe
