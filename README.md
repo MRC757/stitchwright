@@ -60,9 +60,16 @@ macOS.
 2. **Choose threads.** Double-click an object (or select several and press **Choose
    thread…**) to pick one of the 61 threads. Tick *Also use it for…* to recolour every object
    that had the same SVG colour. **Sew / skip** (Space) leaves objects out.
-3. **Arrange.** Click objects in the preview or the list to select them (Shift or Ctrl adds to
-   the selection, Ctrl+A selects all). Then:
-   - drag to move them, and use the arrow keys to nudge 1 mm (Shift: 0.1 mm)
+3. **Arrange.** Select what you want to change:
+   - drag a box around objects in the preview. Everything entirely inside is selected, and the
+     objects that will be caught are highlighted while you drag. Hold Shift to add to the
+     selection.
+   - or click an object's outline, or click inside a shape (Shift or Ctrl adds to the
+     selection)
+   - **Select all** (Ctrl+A) for the whole design, Esc for nothing
+
+   Then:
+   - drag the selection to move it, and use the arrow keys to nudge 1 mm (Shift: 0.1 mm)
    - drag a corner handle to resize, or the round handle to rotate (Shift: 15° steps)
    - or type an exact size, position or angle in the **Arrange** tab, which also has
      **⟲ 90° / ⟳ 90°**, **Centre in hoop**, **Fit to hoop** and **Reset**

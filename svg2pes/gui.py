@@ -378,6 +378,7 @@ class App:
         self.b_undo.pack(side="left", padx=(12, 0))
         self.b_redo = ttk.Button(bar, text="Redo", command=self.redo, state="disabled", width=6)
         self.b_redo.pack(side="left", padx=(4, 0))
+        ttk.Button(bar, text="Select all", command=self.select_all).pack(side="left", padx=(12, 0))
         self.l_file = ttk.Label(bar, text="No file open", foreground="#555555")
         self.l_file.pack(side="left", padx=12)
 
@@ -470,8 +471,10 @@ class App:
         ttk.Button(af, text="Fit to hoop", command=self.fit_target).pack(side="left", padx=6)
         ttk.Button(af, text="Reset", command=self.reset_target).pack(side="left")
         ttk.Label(f_arr, **grey, justify="left", text=(
-            "In the preview: drag to move, corner handles resize, the round handle\n"
-            "rotates (Shift: 15° steps). Arrow keys nudge 1 mm (Shift: 0.1 mm).")) \
+            "In the preview: drag a box around objects to select them (Ctrl+A or\n"
+            "Select all for everything, Esc for none). Drag the selection to move it;\n"
+            "corner handles resize, the round handle rotates (Shift: 15° steps).\n"
+            "Arrow keys nudge 1 mm (Shift: 0.1 mm).")) \
             .grid(row=5, column=0, columnspan=4, sticky="w", pady=(4, 0))
         for e, fn in ((self.e_w, self.apply_size), (self.e_h, self.apply_size),
                       (self.e_x, self.apply_position), (self.e_y, self.apply_position)):
@@ -544,6 +547,7 @@ class App:
         r.bind_all("<Control-y>", lambda e: self._main_key(e, self.redo, text_ok=False))
         r.bind_all("<Control-Z>", lambda e: self._main_key(e, self.redo, text_ok=False))
         r.bind_all("<Control-a>", lambda e: self._main_key(e, self.select_all, text_ok=False))
+        r.bind_all("<Escape>", lambda e: self._main_key(e, self.select_none, text_ok=False))
 
     def _main_key(self, event, fn, text_ok: bool = True):
         """Run a shortcut only in the main window, and (unless text_ok) not while
@@ -747,6 +751,13 @@ class App:
     def select_all(self):
         if self.order_ids:
             self.tree.selection_set(self.order_ids)
+            self.set_status(f"Selected all {len(self.order_ids)} objects.")
+
+    def select_none(self):
+        if self.drag and self.drag["mode"] == "box":     # Esc during a box drag cancels it
+            self.drag = None
+            self.canvas.delete("box")
+        self.tree.selection_remove(self.tree.selection())
 
     def change_thread(self):
         sel = self._need_selection()
@@ -985,7 +996,9 @@ class App:
         return "break"
 
     # ---------------------------------------------------------------- preview mouse
-    def hit_test(self, cx, cy) -> str | None:
+    def hit_test(self, cx, cy) -> tuple[str | None, bool]:
+        """The object under a canvas point, and whether the point is on its outline
+        (True) or only inside a closed shape (False)."""
         p = self.from_canvas(cx, cy)
         tol = 6 * self.ui / self.px
         best = None
@@ -1002,7 +1015,22 @@ class App:
                     continue
                 if best is None or score < best[0]:
                     best = (score, oid)
-        return best[1] if best else None
+        if best is None:
+            return None, False
+        return best[1], bool(best[0] <= tol)
+
+    def objects_in_box(self, c0, c1) -> list[str]:
+        """Objects lying entirely inside the rectangle between two canvas points
+        (skipped objects included, so they stay in place with the rest)."""
+        (x0, y0), (x1, y1) = self.from_canvas(*c0), self.from_canvas(*c1)
+        x0, x1 = sorted((x0, x1))
+        y0, y1 = sorted((y0, y1))
+        out = []
+        for oid in self.order_ids:
+            b = self.target_bounds([oid])
+            if b and x0 <= b[0] and y0 <= b[1] and b[2] <= x1 and b[3] <= y1:
+                out.append(oid)
+        return out
 
     def _near(self, p, q) -> bool:
         return math.dist(p, q) <= 7 * self.ui
@@ -1018,7 +1046,7 @@ class App:
                 cursor = "sizing"
             elif self._in_box(e.x, e.y):
                 cursor = "fleur"
-        if not cursor and self.order_ids and self.hit_test(e.x, e.y):
+        if not cursor and self.order_ids and self.hit_test(e.x, e.y)[1]:
             cursor = "hand2"
         self.canvas.configure(cursor=cursor)
 
@@ -1044,18 +1072,23 @@ class App:
                 mode = "scale"
             elif self._in_box(*p):
                 mode = "move"
+        self.drag = None
         if mode is None:
-            hit = self.hit_test(*p)
-            if hit is None:
-                if not additive:
-                    self.tree.selection_remove(self.tree.selection())
-            elif additive:
-                self.tree.selection_toggle(hit)
-            else:
+            hit, on_line = self.hit_test(*p)
+            if hit is not None and on_line:
+                if additive:
+                    self.tree.selection_toggle(hit)
+                    return
                 if hit not in self.tree.selection():
                     self.tree.selection_set(hit)
                 mode = "move"
-        self.drag = None
+            else:
+                # Empty space, or inside a shape: dragging draws a selection box,
+                # a plain click selects that shape (or clears the selection).
+                self.drag = {"mode": "box", "start": p, "moved": False, "hit": hit,
+                             "additive": additive,
+                             "base": list(self.selection()) if additive else []}
+                return
         if mode:
             b = self.target_bounds(self.selection())
             if b:
@@ -1070,6 +1103,9 @@ class App:
         if not d["moved"] and abs(e.x - sx) + abs(e.y - sy) < 3:
             return
         d["moved"] = True
+        if d["mode"] == "box":
+            self.draw_box(d["start"], (e.x, e.y), d["base"])
+            return
         cx, cy = d["centre"]
         ccx, ccy = self.to_canvas(cx, cy)
         if d["mode"] == "move":
@@ -1094,10 +1130,41 @@ class App:
 
     def on_release(self, e):
         d, self.drag = self.drag, None
+        if d and d["mode"] == "box":
+            self.canvas.delete("box")
+            if d["moved"]:
+                caught = self.objects_in_box(d["start"], (e.x, e.y))
+                chosen = list(dict.fromkeys(d["base"] + caught))
+                self.tree.selection_set(chosen) if chosen else \
+                    self.tree.selection_remove(self.tree.selection())
+                self.set_status(f"Selected {len(chosen)} object(s)." if chosen else
+                                "Nothing was entirely inside the box.",
+                                "#333333" if chosen else WARN_COLOUR)
+            elif d["hit"] is not None:
+                if d["additive"]:
+                    self.tree.selection_toggle(d["hit"])
+                else:
+                    self.tree.selection_set(d["hit"])
+            elif not d["additive"]:
+                self.tree.selection_remove(self.tree.selection())
+            return
         if d and d["moved"] and d["m"] is not None:
             self.apply_transform(d["m"], self.selection())
         else:
             self.draw_overlay()
+
+    def draw_box(self, c0, c1, base: list[str]):
+        """Rubber-band rectangle, with the objects it would select highlighted."""
+        cv = self.canvas
+        cv.delete("box")
+        caught = self.objects_in_box(c0, c1)
+        for oid in dict.fromkeys(base + caught):
+            for pts in self.placed.get(oid, []):
+                cv.create_line(*[c for x, y in pts for c in self.to_canvas(x, y)],
+                               fill=SELECT_COLOUR, width=max(2, round(2 * self.ui)), tags="box")
+        cv.create_rectangle(*c0, *c1, outline=SELECT_COLOUR, dash=(4, 3), tags="box")
+        self.set_status(f"Box: {len(caught)} object(s) entirely inside"
+                        + (f", {len(base)} already selected" if base else ""))
 
     def on_select(self):
         self.draw_overlay()
