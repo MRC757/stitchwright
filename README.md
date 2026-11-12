@@ -35,8 +35,12 @@ Stitchwright was called *svg2pes* before version 0.2.1.
 - Fill (tatami) for closed shapes:
   - you choose the angle, density and stitch length
   - underlay and pull compensation help it lie flat
-  - fill hidden under shapes stacked on top is cut out
+  - fill hidden under shapes stacked on top is cut out (the fill below still runs 0.4 mm
+    under the shape on top, so no fabric shows between them)
   - separate pieces are joined by travel stitches instead of jumps
+  - overlapping parts of one shape are filled as drawn (SVG's `nonzero` rule, which fonts use
+    too); a shape marked `fill-rule="evenodd"` gets holes where its parts overlap. Holes
+    such as the middle of an "o" stay empty either way.
 - Fills are sewn before outlines. You can reorder the colour stops yourself.
 - A sewing-time estimate for the whole design and for each colour stop.
 
@@ -98,7 +102,8 @@ Windows app is built with, which need Python 3.12 or later; on Python 3.10 or 3.
   embroidery file (PES, DST, JEF, EXP, VP3) or a picture. The design is centred in the hoop
   and shrunk if it is too big.
 - **File → Import into this design…** (Ctrl+I) adds another file's objects to the current
-  design. **File → Import picture…** traces a picture: choose the number of thread colours,
+  design. **File → Import picture…** traces a picture (phone photos are turned the right way
+  up first): choose the number of thread colours,
   the width, whether to leave out the background, and the detail level. A preview shows the
   result and names the threads. Simple, flat-coloured pictures (logos, clip art) work best.
 - **Add text…** (Ctrl+T): type the text, choose a font and the letter height (the height of
@@ -170,10 +175,13 @@ The preview is drawn from the stitches that will be saved, not from the artwork.
 ### Saving
 - **Save project** (Ctrl+Shift+S) saves everything to a `.stitchwright` file: outlines,
   positions, threads, fills, text, groups, sewing order and settings. Open it again with
-  File → Open. The window asks before closing or opening over unsaved changes. Projects
-  saved by svg2pes (`.svg2pes` files) open too.
+  File → Open. A dot before the name in the title bar means there are unsaved changes, and
+  the window asks before closing or opening over them. Projects saved by svg2pes
+  (`.svg2pes` files) open too.
 - **Save PES…** (Ctrl+S) writes the file for the machine and suggests a short name without
-  spaces for the USB stick.
+  spaces for the USB stick. If it can't save yet (nothing open, or a setting the planner
+  refuses), the status bar says why.
+- Keyboard shortcuts work the same with Caps Lock on.
 
 ## Using the command line
 
@@ -225,9 +233,10 @@ colour stop.
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
 **What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
-(`samples/sample.pes`) loads and is read by the PE540D. Fills, satin, lettering, imported
-pictures and arranged layouts are tested in code and in the preview, but have not been sewn
-yet. Sew a test piece before using them on a real project.
+(`samples/sample.pes`) loads and is read by the PE540D. Fills (including the nonzero fill
+rule and the 0.4 mm overlap under stacked shapes), satin, lettering, imported pictures and
+arranged layouts are tested in code and in the preview, but have not been sewn yet. Sew a
+test piece before using them on a real project.
 
 ## Limitations
 
@@ -236,8 +245,11 @@ yet. Sew a test piece before using them on a real project.
   stitch.
 - **Fills** are tatami only: there is no contour or radial fill. Very thin areas fill
   poorly; give them a satin outline instead.
-- **Overlapping fills:** the area under an upper fill is cut out of the fill below it, but
-  shapes that are only outlined don't cut anything out.
+- **Overlapping fills:** the area under an upper fill is cut out of the fill below it (less a
+  0.4 mm overlap), but shapes that are only outlined don't cut anything out.
+- **Imported stitches** (from PES, DST and other embroidery files) are sewn point for point.
+  Resizing them changes how far apart the stitches are, not how many there are; you get a
+  warning beyond 80–120%, and for any stitch longer than 12 mm.
 - **Text:**
   - Outline-font text gets crowded below about 8 mm.
   - Kerning is not applied.
