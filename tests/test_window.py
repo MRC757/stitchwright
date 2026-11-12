@@ -33,6 +33,48 @@ def test_settings_changes_mark_the_design_modified(app, tmp_path, monkeypatch):
     assert app.v_margin.get() == "4"
 
 
+def test_ctrl_z_undoes_with_caps_lock_on_and_redoes_with_shift(app):
+    from types import SimpleNamespace
+    from stitchwright.geometry import translate
+    app.open(SAMPLE)
+    app.apply_transform(translate(5, 0))
+    caps_lock = 0x0002
+
+    def press(key, state):
+        letter = key.lower()
+        app._shortcut(SimpleNamespace(widget=app.canvas, state=gui.CONTROL | state, keysym=key),
+                      letter)
+
+    press("Z", caps_lock)                       # Caps Lock: Tk says "Z", but it is Ctrl+Z
+    assert not app.doc.undo_stack and len(app.doc.redo_stack) == 1
+    press("Z", caps_lock | gui.SHIFT)           # Ctrl+Shift+Z redoes
+    assert len(app.doc.undo_stack) == 1 and not app.doc.redo_stack
+    press("z", gui.SHIFT)
+    assert len(app.doc.undo_stack) == 1         # nothing left to redo: no change
+
+
+def test_a_real_capital_z_key_event_without_shift_undoes(app):
+    """What Tk delivers for Ctrl+Z with Caps Lock on: the keysym Z, no Shift bit."""
+    from stitchwright.geometry import translate
+    app.open(SAMPLE)
+    app.apply_transform(translate(5, 0))
+    app.root.deiconify()                      # Tk only delivers key events to a shown window
+    app.root.update()
+    app.canvas.focus_force()
+    app.root.update()
+    # (event_generate("<Control-Z>") would add the Shift bit itself: that is Ctrl+Shift+Z)
+    app.canvas.event_generate("<KeyPress>", keysym="Z", state=gui.CONTROL | 0x0002, when="now")
+    app.root.update()
+    app.root.withdraw()
+    assert not app.doc.undo_stack and len(app.doc.redo_stack) == 1
+
+
+def test_every_shortcut_is_bound_in_both_cases(app):
+    for letter in app._shortcuts:
+        for key in (letter, letter.upper()):
+            assert app.root.bind_all(f"<Control-{key}>"), key
+
+
 def _red_square_png(tmp_path):
     from PIL import Image, ImageDraw
     img = Image.new("RGB", (60, 60), "white")

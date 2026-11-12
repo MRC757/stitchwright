@@ -393,22 +393,27 @@ class App:
                                            "stitched in order.", foreground="#555555")
         self.l_sim.pack(fill="x", pady=(2, 0))
 
-        r.bind_all("<Control-o>", lambda e: self._main_key(e, self.ask_open))
-        r.bind_all("<Control-n>", lambda e: self._main_key(e, self.new_design))
-        r.bind_all("<Control-i>", lambda e: self._main_key(e, self.ask_import))
-        r.bind_all("<Control-S>", lambda e: self._main_key(e, self.save_project))
         r.protocol("WM_DELETE_WINDOW", self.exit_app)
-        r.bind_all("<Control-s>", lambda e: self._main_key(e, self.save))
-        r.bind_all("<Control-t>", lambda e: self._main_key(e, self.add_text))
-        r.bind_all("<Control-z>", lambda e: self._main_key(e, self.undo, text_ok=False))
-        r.bind_all("<Control-y>", lambda e: self._main_key(e, self.redo, text_ok=False))
-        r.bind_all("<Control-Z>", lambda e: self._main_key(e, self.redo, text_ok=False))
-        r.bind_all("<Control-a>", lambda e: self._main_key(e, self.select_all, text_ok=False))
-        r.bind_all("<Control-c>", lambda e: self._main_key(e, self.copy_selection, text_ok=False))
-        r.bind_all("<Control-v>", lambda e: self._main_key(e, self.paste, text_ok=False))
-        r.bind_all("<Control-d>", lambda e: self._main_key(e, self.duplicate, text_ok=False))
-        r.bind_all("<Control-g>", lambda e: self._main_key(e, self.group_selection, text_ok=False))
-        r.bind_all("<Control-G>", lambda e: self._main_key(e, self.ungroup_selection, text_ok=False))
+        # Ctrl+letter: (command, command with Shift held, works while typing in a text box).
+        # Both cases of each letter are bound and Shift is read from the event, because
+        # with Caps Lock on Tk reports the capital letter for an unshifted key.
+        self._shortcuts = {
+            "o": (self.ask_open, None, True),
+            "n": (self.new_design, None, True),
+            "i": (self.ask_import, None, True),
+            "s": (self.save, self.save_project, True),
+            "t": (self.add_text, None, True),
+            "z": (self.undo, self.redo, False),
+            "y": (self.redo, None, False),
+            "a": (self.select_all, None, False),
+            "c": (self.copy_selection, None, False),
+            "v": (self.paste, None, False),
+            "d": (self.duplicate, None, False),
+            "g": (self.group_selection, self.ungroup_selection, False),
+        }
+        for letter in self._shortcuts:
+            for key in (letter, letter.upper()):
+                r.bind_all(f"<Control-{key}>", lambda e, k=letter: self._shortcut(e, k))
         self._build_menu()
         r.bind_all("<Escape>", lambda e: self._main_key(e, self.select_none, text_ok=False))
 
@@ -525,6 +530,12 @@ class App:
             if size != (100, 100):
                 self.set_status("The PE540D sews only in its 4 × 4 in (100 × 100 mm) hoop; larger "
                                 "hoops are for other machines.", WARN_COLOUR)
+
+    def _shortcut(self, event, letter: str):
+        """Ctrl+letter, with or without Shift (Caps Lock makes no difference)."""
+        plain, shifted, text_ok = self._shortcuts[letter]
+        fn = shifted if shifted is not None and event.state & SHIFT else plain
+        return self._main_key(event, fn, text_ok)
 
     def _main_key(self, event, fn, text_ok: bool = True):
         """Run a shortcut only in the main window, and (unless text_ok) not while
