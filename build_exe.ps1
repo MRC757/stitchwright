@@ -7,6 +7,10 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+if (Get-Process svg2pes -ErrorAction SilentlyContinue) {
+    throw "svg2pes is running. Close it first: Windows will not let the build replace dist\svg2pes.exe while it is open."
+}
+
 if (-not (Test-Path ".venv-build\Scripts\python.exe")) {
     Write-Host "Creating build environment (.venv-build)..."
     python -m venv .venv-build

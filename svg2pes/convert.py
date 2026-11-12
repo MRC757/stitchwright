@@ -124,7 +124,7 @@ def _check_inputs(hoop_mm, margin_mm, width_mm, s: Settings) -> None:
 def build_pattern(blocks: list[ColorBlock], s: Settings) -> EmbPattern:
     """Assemble an EmbPattern. Coordinates are millimetres in, 0.1 mm units out."""
     pattern = EmbPattern()
-    here = (0, 0)
+    here = None
 
     def u(v: float) -> int:
         return int(round(v * 10))
@@ -150,7 +150,9 @@ def build_pattern(blocks: list[ColorBlock], s: Settings) -> EmbPattern:
                     clean.append(p)
             if len(clean) < 2:
                 continue
-            if math.dist(clean[0], here) / 10.0 > s.trim_dist:
+            # trim long jumps, but not before the first stitch: a trim there would
+            # sit at the origin and stretch the design's extent to include it
+            if here is not None and math.dist(clean[0], here) / 10.0 > s.trim_dist:
                 pattern.trim()
             pattern.move_abs(*clean[0])
             for p in clean:
@@ -181,9 +183,15 @@ def plan_design(design: Design, *,
                 hoop_mm: tuple[float, float] = (100.0, 100.0),
                 margin_mm: float = 2.0,
                 settings: Settings | None = None,
-                snap: bool = True) -> Plan:
+                snap: bool = True,
+                placed: bool = False) -> Plan:
     """Turn a loaded design into stitches without writing anything.
-    The design passed in is not modified."""
+    The design passed in is not modified.
+
+    placed=True means the objects are already positioned in hoop coordinates
+    (millimetres, hoop centre at 0,0), as the GUI does: no scaling, centring or
+    size check is applied and width_mm / fit are ignored. Check the placement
+    with outside_hoop()."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
     design = copy.deepcopy(design)
@@ -202,27 +210,9 @@ def plan_design(design: Design, *,
     w, h = x1 - x0, y1 - y0
     if w <= 0 and h <= 0:
         raise ConversionError("Nothing to stitch: the design has no size")
-    avail_w, avail_h = hoop_mm[0] - 2 * margin_mm, hoop_mm[1] - 2 * margin_mm
     scale = 1.0
-    if width_mm is not None:
-        if w <= 0:
-            raise ConversionError("The design has no width (a vertical line), so --width "
-                                  "cannot size it")
-        scale = width_mm / w
-    if w * scale > avail_w or h * scale > avail_h:
-        fit_scale = _fit_scale(w, h, avail_w, avail_h)
-        if fit:
-            warnings.append(f"Design scaled to {fit_scale:.0%} to fit the hoop")
-            scale = fit_scale
-        else:
-            raise ConversionError(
-                f"Design is {w * scale:.1f} x {h * scale:.1f} mm but the usable area is "
-                f"{avail_w:.0f} x {avail_h:.0f} mm (hoop {hoop_mm[0]:.0f} x {hoop_mm[1]:.0f} mm "
-                f"minus {margin_mm:g} mm margin). Turn on shrink-to-fit (--fit) or set a "
-                f"smaller width (--width).")
-    if scale != 1.0:
-        _scale_design(design, scale)
-    _center_design(design)
+    if not placed:
+        scale = _size_and_centre(design, w, h, width_mm, fit, hoop_mm, margin_mm, warnings)
 
     blocks = plan_blocks(design.active(), s)
     if not blocks:
@@ -245,6 +235,45 @@ def plan_design(design: Design, *,
     report = Report("", stitches, jumps, trims, len(blocks),
                     (bx1 - bx0) / 10.0, (by1 - by0) / 10.0, scale, tmap, warnings)
     return Plan(pattern, report)
+
+
+def _size_and_centre(design: Design, w: float, h: float, width_mm, fit, hoop_mm,
+                     margin_mm, warnings: list[str]) -> float:
+    """Scale (for width_mm / fit) and centre the design on the hoop. Returns the scale."""
+    avail_w, avail_h = hoop_mm[0] - 2 * margin_mm, hoop_mm[1] - 2 * margin_mm
+    scale = 1.0
+    if width_mm is not None:
+        if w <= 0:
+            raise ConversionError("The design has no width (a vertical line), so --width "
+                                  "cannot size it")
+        scale = width_mm / w
+    if w * scale > avail_w or h * scale > avail_h:
+        fit_scale = _fit_scale(w, h, avail_w, avail_h)
+        if fit:
+            warnings.append(f"Design scaled to {fit_scale:.0%} to fit the hoop")
+            scale = fit_scale
+        else:
+            raise ConversionError(
+                f"Design is {w * scale:.1f} x {h * scale:.1f} mm but the usable area is "
+                f"{avail_w:.0f} x {avail_h:.0f} mm (hoop {hoop_mm[0]:.0f} x {hoop_mm[1]:.0f} mm "
+                f"minus {margin_mm:g} mm margin). Turn on shrink-to-fit (--fit) or set a "
+                f"smaller width (--width).")
+    if scale != 1.0:
+        _scale_design(design, scale)
+    _center_design(design)
+    return scale
+
+
+def outside_hoop(design: Design, hoop_mm: tuple[float, float], margin_mm: float) -> list[str]:
+    """Ids of active objects that reach outside the sewing area (hoop minus margin),
+    for a design placed in hoop coordinates (hoop centre at 0,0)."""
+    hx, hy = hoop_mm[0] / 2 - margin_mm, hoop_mm[1] / 2 - margin_mm
+    out = []
+    for o in design.active():
+        x0, y0, x1, y1 = o.bounds()
+        if x0 < -hx - 1e-6 or x1 > hx + 1e-6 or y0 < -hy - 1e-6 or y1 > hy + 1e-6:
+            out.append(o.obj_id)
+    return out
 
 
 def write_pes_file(plan: Plan, out_path: str, pes_version: int = 1) -> Report:

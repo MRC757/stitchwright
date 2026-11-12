@@ -282,3 +282,83 @@ def test_cli_palette_lists_chart(capsys):
 
 def test_nearest_brother_returns_chart_thread():
     assert nearest_brother((250, 20, 30)).name == "Red"
+
+
+# --- geometry (moving, resizing, rotating) ------------------------------------
+
+def test_transforms_compose_in_order():
+    from svg2pes.geometry import apply, chain, rotate, scale, translate
+    p = [(10.0, 0.0)]
+    assert apply(rotate(90), p)[0] == pytest.approx((0.0, 10.0))       # clockwise on screen
+    assert apply(rotate(90, 10, 10), p)[0] == pytest.approx((20.0, 10.0))
+    assert apply(scale(2, 3, 5, 5), p)[0] == pytest.approx((15.0, -10.0))
+    m = chain(translate(1, 2), scale(2), rotate(180))
+    assert apply(m, p)[0] == pytest.approx((-22.0, -4.0))
+
+
+def test_placed_designs_are_not_moved_and_outside_is_reported(tmp_path):
+    from svg2pes.convert import outside_hoop
+    from svg2pes.geometry import apply, translate
+    from svg2pes.svg_import import Design, Polyline
+    d = load_svg(SAMPLE)
+    # the sample spans x 2..58, y 2..38: place it 25 mm right of the hoop centre
+    for o in d.objects:
+        o.polylines = [Polyline(apply(translate(-5, -20), pl.points), pl.closed) for pl in o.polylines]
+    plan = plan_design(d, placed=True)
+    bx0, by0, bx1, by1 = plan.pattern.bounds()
+    assert (bx0 / 10, bx1 / 10) == pytest.approx((-3.0, 53.0), abs=0.2)   # not re-centred
+    assert outside_hoop(d, (100, 100), 2) == ["badge"]                  # reaches x = 53 > 48
+    assert outside_hoop(d, (120, 100), 2) == []
+
+
+# --- text -------------------------------------------------------------------
+
+def _font():
+    from svg2pes.text import default_font
+    f = default_font()
+    if f is None:
+        pytest.skip("no fonts installed")
+    return f
+
+
+def test_text_outlines_have_the_requested_height():
+    from svg2pes.geometry import bounds
+    from svg2pes.text import TextSpec, text_polylines
+    name, path, idx = _font()
+    polys, missing = text_polylines(TextSpec("HI", path, name, idx, height_mm=12))
+    x0, y0, x1, y1 = bounds([p for pl in polys for p in pl.points])
+    assert y1 - y0 == pytest.approx(12, abs=0.3)          # capitals are the letter height
+    assert (x0 + x1) / 2 == pytest.approx(0, abs=1e-6) and (y0 + y1) / 2 == pytest.approx(0, abs=1e-6)
+    assert all(pl.closed for pl in polys) and missing == ""
+
+
+def test_text_two_lines_and_missing_characters():
+    from svg2pes.geometry import bounds
+    from svg2pes.text import TextSpec, text_polylines
+    name, path, idx = _font()
+    one, _ = text_polylines(TextSpec("Ab", path, name, idx, 10))
+    two, missing = text_polylines(TextSpec("Ab\nAb\u2603", path, name, idx, 10))
+    h1 = bounds([p for pl in one for p in pl.points])
+    h2 = bounds([p for pl in two for p in pl.points])
+    assert (h2[3] - h2[1]) > 1.8 * (h1[3] - h1[1])
+    assert missing == "\u2603" and len(two) == 2 * len(one)
+
+
+def test_text_converts_and_sews(tmp_path):
+    from svg2pes.svg_import import Design, DesignObject
+    from svg2pes.text import TextSpec, text_polylines
+    name, path, idx = _font()
+    polys, _ = text_polylines(TextSpec("Sew", path, name, idx, 10))
+    d = Design([DesignObject(1, "text1", "Text", (0, 0, 0), polys, color=(0, 0, 0))], [])
+    plan = plan_design(d, placed=True)
+    assert plan.report.thread_map[0].thread.number == "900"
+    rep = write_pes_file(plan, str(tmp_path / "t.pes"))
+    assert rep.stitch_count > 50
+
+
+def test_bad_font_is_a_clear_error(tmp_path):
+    from svg2pes.text import TextSpec, text_polylines
+    bad = tmp_path / "bad.ttf"
+    bad.write_bytes(b"not a font")
+    with pytest.raises(ValueError, match="Cannot read font"):
+        text_polylines(TextSpec("A", str(bad)))

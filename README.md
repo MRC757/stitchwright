@@ -19,8 +19,11 @@ Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Milestone 1 se
   twice for the same spool.
 - Orders the outlines to keep jumps short. Each outline gets tie-in and tie-off stitches,
   and no stitch is shorter than 0.4 mm (very short stitches tend to break the thread).
-- Centres the design in the hoop, checks it fits (or shrinks it to fit), and checks each file
-  after saving by reading it back.
+- Lets you move, resize and rotate objects in the hoop, by dragging in the preview or by
+  typing sizes, positions and angles. Undo and redo are included.
+- Adds text in any installed font, sewn as letter outlines.
+- Checks that everything fits inside the hoop and its margin, and checks each saved file by
+  reading it back.
 - Comes with a desktop window and a command line. Both use the same conversion code.
 
 ## Windows app (.exe)
@@ -51,14 +54,30 @@ macOS.
 
     python -m svg2pes gui                 # or double-click svg2pes_gui.pyw on Windows
 
-1. **Open SVG…** (Ctrl+O). Each object appears with two swatches: its colour in the SVG and
-   the Brother thread it will be sewn in.
-2. Double-click an object (or select several and press **Choose thread…**) to pick one of the
-   61 threads. Tick *Also use it for…* to recolour every object that had the same SVG colour.
-   **Sew / skip** (Space) leaves objects out.
-3. Set the hoop, margin, width and stitch length. The preview and the **Sewing order** list
-   (one row per thread change on the machine) update as you type.
-4. **Save PES…** (Ctrl+S). It suggests a short file name without spaces for the USB stick.
+1. **Open SVG…** (Ctrl+O). The design is centred in the hoop (and shrunk if it is too big).
+   Each object appears with two swatches: its colour in the SVG and the Brother thread it
+   will be sewn in.
+2. **Choose threads.** Double-click an object (or select several and press **Choose
+   thread…**) to pick one of the 61 threads. Tick *Also use it for…* to recolour every object
+   that had the same SVG colour. **Sew / skip** (Space) leaves objects out.
+3. **Arrange.** Click objects in the preview or the list to select them (Shift or Ctrl adds to
+   the selection, Ctrl+A selects all). Then:
+   - drag to move them, and use the arrow keys to nudge 1 mm (Shift: 0.1 mm)
+   - drag a corner handle to resize, or the round handle to rotate (Shift: 15° steps)
+   - or type an exact size, position or angle in the **Arrange** tab, which also has
+     **⟲ 90° / ⟳ 90°**, **Centre in hoop**, **Fit to hoop** and **Reset**
+
+   With nothing selected, the Arrange tab acts on the whole design. Anything outside the
+   sewing area is outlined in red, and Save stays off until it is moved back in.
+4. **Add text…** (Ctrl+T). Type the text, then pick a font and the letter height (the height
+   of the capitals; 8 mm or more sews best). The text appears in the middle of the hoop in
+   900 Black. Drag it into place and change its thread like any other object. Double-click
+   it to edit, or press **Delete text** to remove it.
+5. Check the **Stitching** tab (hoop, margin, stitch length) and the **Sewing order** tab (one
+   row per thread change on the machine).
+6. **Save PES…** (Ctrl+S). It suggests a short file name without spaces for the USB stick.
+
+Undo and Redo (Ctrl+Z / Ctrl+Y) cover every change in the window.
 
 ## Using the command line
 
@@ -101,12 +120,16 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 
 - Shapes are sewn as outlines only. Filled shapes become outlines, and fill and satin stitches
   come in a later milestone.
-- Text, images, gradients and opacity are ignored. Convert text to paths in your drawing
-  program first.
+- Text inside the SVG, images, gradients and opacity are ignored. Use **Add text…** for
+  lettering, or convert text to paths in your drawing program.
+- Added text is sewn as letter outlines. Small text (under about 8 mm) gets crowded, and
+  kerning is not applied.
+- The arrangement isn't saved with the PES: closing the window loses the layout, so save the
+  PES before you close.
 - The PE540D has no automatic thread cutter, so it most likely ignores the trim codes written
   for long jumps. Snip those threads by hand after sewing.
 - SVGs saved at 72 dpi (some Illustrator exports) come out about 25% smaller than intended.
-  Use `--width` or the Width box to set the size.
+  Use `--width`, or the size boxes in the Arrange tab.
 - Grouping by colour changes the sewing order. With outlines only this hardly matters, but
   once fills arrive, objects that overlap will be sewn in their SVG order.
 
@@ -118,6 +141,8 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 | `svg2pes/palette.py` | the 61 Brother threads and colour parsing |
 | `svg2pes/stitching.py` | outline simplification, needle drops, tie stitches, ordering |
 | `svg2pes/convert.py` | sizing, colour choices, stitch planning, PES writing and checking |
+| `svg2pes/geometry.py` | move, resize and rotate transforms |
+| `svg2pes/text.py` | text to outlines with installed fonts |
 | `svg2pes/preview.py` | draws the stitch preview |
 | `svg2pes/gui.py` | the Tkinter window |
 | `svg2pes/cli.py` | the command line |
@@ -132,7 +157,8 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 ## Built with
 
 [pyembroidery](https://github.com/EmbroidePy/pyembroidery) (PES writing),
-[svgelements](https://github.com/meerk40t/svgelements) (SVG parsing), Pillow and NumPy.
+[svgelements](https://github.com/meerk40t/svgelements) (SVG parsing),
+[fontTools](https://github.com/fonttools/fonttools) (fonts), Pillow and NumPy.
 Brother and PE540D are trademarks of Brother Industries, Ltd. This project is not affiliated
 with Brother.
 
