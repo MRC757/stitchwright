@@ -28,6 +28,8 @@ from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_vie
 from .stitching import Settings
 from .svg_import import Design, DesignObject, Polyline, load_svg
 from .fill import FillSpec, SatinSpec, can_fill
+from .image_import import TraceSettings, trace_image
+from .image_import import preview as image_preview
 from .pes_import import READ_EXTENSIONS, load_stitches
 from .project import EXTENSION as PROJECT_EXTENSION
 from .project import Project, load_project, save_project
@@ -495,6 +497,113 @@ class FillDialog(tk.Toplevel):
         return self.result
 
 
+class ImageDialog(tk.Toplevel):
+    """Settings for turning a picture into stitches, with a live preview of the
+    colour reduction. After wait(), .result is None or (TraceSettings, fill: bool)."""
+
+    def __init__(self, parent, ui: float, path: str, width_mm: float):
+        super().__init__(parent)
+        self.title(f"Import picture: {os.path.basename(path)}")
+        self.transient(parent)
+        self.resizable(False, False)
+        self.ui, self.path = ui, path
+        self.result = None
+        self._job = None
+        self._photo = None
+        self.v_colours = tk.StringVar(value="4")
+        self.v_width = tk.StringVar(value=f"{width_mm:g}")
+        self.v_bg = tk.BooleanVar(value=True)
+        self.v_detail = tk.StringVar(value="Normal")
+        self.v_fill = tk.BooleanVar(value=True)
+        grey = dict(foreground="#666666")
+        f = ttk.Frame(self, padding=12)
+        f.pack(fill="both", expand=True)
+        size = int(360 * ui)
+        self.cv = tk.Canvas(f, width=size, height=size, bg="white", highlightthickness=1,
+                            highlightbackground="#cccccc")
+        self.cv.grid(row=0, column=0, rowspan=8, padx=(0, 12))
+        ttk.Label(f, text="Thread colours").grid(row=0, column=1, sticky="w")
+        ttk.Spinbox(f, from_=1, to=8, textvariable=self.v_colours, width=5,
+                    command=self._schedule).grid(row=0, column=2, sticky="w")
+        ttk.Label(f, text="Width (mm)").grid(row=1, column=1, sticky="w", pady=(6, 0))
+        ttk.Entry(f, textvariable=self.v_width, width=7).grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(f, text="Leave out the background colour", variable=self.v_bg,
+                        command=self._schedule).grid(row=2, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(f, text="Detail").grid(row=3, column=1, sticky="w", pady=(6, 0))
+        ttk.Combobox(f, textvariable=self.v_detail, values=("Fine", "Normal", "Coarse"),
+                     state="readonly", width=8).grid(row=3, column=2, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(f, text="Fill the areas (else outlines only)",
+                        variable=self.v_fill).grid(row=4, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(f, **grey, justify="left", wraplength=int(250 * ui), text=(
+            "Simple pictures with a few flat colours work best: logos, clip art, drawings. "
+            "Photos don't turn into good embroidery.")).grid(row=5, column=1, columnspan=2,
+                                                             sticky="w", pady=(10, 0))
+        self.info = ttk.Label(f, text="", foreground="#555555", wraplength=int(250 * ui))
+        self.info.grid(row=6, column=1, columnspan=2, sticky="nw", pady=(8, 0))
+        bf = ttk.Frame(f)
+        bf.grid(row=7, column=1, columnspan=2, sticky="se")
+        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(bf, text="Import", command=self._ok).pack(side="right", padx=6)
+        for v in (self.v_colours, self.v_detail):
+            v.trace_add("write", lambda *a: self._schedule())
+        self.bind("<Escape>", lambda e: self.destroy())
+        _centre_on(self, parent)
+        self._preview()
+
+    def _settings(self) -> TraceSettings:
+        try:
+            colours = int(self.v_colours.get())
+            width = float(self.v_width.get())
+        except ValueError:
+            raise ValueError("Colours and width must be numbers") from None
+        if not 1 <= colours <= 8:
+            raise ValueError("Choose 1 to 8 colours")
+        if width <= 0:
+            raise ValueError("Width must be more than 0")
+        return TraceSettings(colours, width, self.v_bg.get(), self.v_detail.get().lower())
+
+    def _schedule(self):
+        if self._job is not None:
+            self.after_cancel(self._job)
+        self._job = self.after(250, self._preview)
+
+    def _preview(self):
+        self._job = None
+        try:
+            s = self._settings()
+            img = image_preview(self.path, s)
+        except (ValueError, OSError) as e:
+            self.info.configure(text=str(e), foreground=ERROR_COLOUR)
+            return
+        size = int(self.cv["width"])
+        img.thumbnail((size - 8, size - 8), Image.NEAREST)
+        self._photo = ImageTk.PhotoImage(img, master=self)
+        self.cv.delete("all")
+        self.cv.create_image(size / 2, size / 2, image=self._photo)
+        names = []
+        colours = sorted({c for c in img.getdata() if c != (255, 255, 255)})
+        for c in colours[:8]:
+            t = nearest_brother(c)
+            names.append(f"{t.number} {t.name}")
+        self.info.configure(text="Threads: " + (", ".join(dict.fromkeys(names)) or "none"),
+                            foreground="#555555")
+
+    def _ok(self):
+        try:
+            s = self._settings()
+        except ValueError as e:
+            self.info.configure(text=str(e), foreground=ERROR_COLOUR)
+            return
+        self.result = (s, self.v_fill.get())
+        self.destroy()
+
+    def wait(self):
+        self.grab_set()
+        self.focus_set()
+        self.wait_window()
+        return self.result
+
+
 # ------------------------------------------------------------------ main window
 class App:
     def __init__(self, root: tk.Tk, path: str | None = None):
@@ -871,6 +980,7 @@ class App:
         self.m_file.add_command(label="Open…", accelerator="Ctrl+O", command=self.ask_open)
         self.m_file.add_command(label="Import into this design…", accelerator="Ctrl+I",
                                 command=self.ask_import)
+        self.m_file.add_command(label="Import picture…", command=self.ask_import_image)
         self.m_file.add_command(label="Add text…", accelerator="Ctrl+T", command=self.add_text)
         self.m_file.add_separator()
         self.m_file.add_command(label="Save project", accelerator="Ctrl+Shift+S",
@@ -1256,8 +1366,44 @@ class App:
             return False
         return self.save_project() if ans else True
 
+    def ask_import_image(self):
+        path = filedialog.askopenfilename(
+            parent=self.root, title="Import a picture",
+            filetypes=[("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"), ("All files", "*.*")])
+        if path:
+            self.import_image(path)
+
     def import_image(self, path: str):
-        self.set_status("Picture import is not available yet.", WARN_COLOUR)
+        """Trace a picture into filled shapes and add them to the design."""
+        width = min(80.0, self.hoop[0] - 2 * self.margin)
+        try:
+            res = ImageDialog(self.root, self.ui, path, width).wait()
+        except OSError as e:
+            messagebox.showerror(TITLE, f"Could not open {path}:\n\n{e}", parent=self.root)
+            return
+        if res is None:
+            return
+        settings, fill = res
+        try:
+            objects, warnings = trace_image(path, settings)
+        except (OSError, ValueError) as e:
+            messagebox.showerror(TITLE, f"Could not trace {path}:\n\n{e}", parent=self.root)
+            return
+        if not objects:
+            self.set_status("; ".join(warnings) or "Nothing to stitch in that picture.", WARN_COLOUR)
+            return
+        fills = {o.obj_id: FillSpec() for o in objects} if fill else None
+        new_ids = self.add_objects(objects, fills=fills)
+        if fill:
+            self.no_outline.update(new_ids)
+            self.fill_objects()
+            self.tree.selection_set(new_ids)
+            self.refresh()
+        if self.svg_path is None:
+            self.svg_path = path
+            self._set_title(os.path.basename(path))
+        self.set_status(f"Picture traced into {len(new_ids)} colour(s). Check the shapes, "
+                        "then adjust threads or fills as needed.", OK_COLOUR)
 
     def exit_app(self):
         if self._confirm_discard():

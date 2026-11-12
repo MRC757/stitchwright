@@ -633,3 +633,27 @@ def test_monogram_and_arc_layouts():
         xs = [q for pl in polys for q in pl.points if abs(q[0]) < 2]
         return min(q[1] for q in xs)
     assert mid_top(arch) < mid_top(smile)
+
+
+# --- picture import ---------------------------------------------------------------
+
+def test_picture_is_traced_into_coloured_shapes(tmp_path):
+    from PIL import Image, ImageDraw
+    from svg2pes.fill import closed_rings
+    from svg2pes.geometry import bounds
+    from svg2pes.image_import import TraceSettings, trace_image
+    img = Image.new("RGB", (200, 100), (240, 240, 240))
+    d = ImageDraw.Draw(img)
+    d.rectangle([10, 10, 90, 90], fill=(200, 30, 40))
+    d.rectangle([40, 40, 60, 60], fill=(240, 240, 240))          # a hole
+    d.ellipse([110, 10, 190, 90], fill=(30, 80, 170))
+    p = tmp_path / "p.png"
+    img.save(p)
+    objs, warnings = trace_image(str(p), TraceSettings(colours=2, width_mm=100))
+    assert not warnings and len(objs) == 2
+    red = next(o for o in objs if o.source_color[0] > 150)
+    assert len(closed_rings(red.polylines)) == 2                  # outside and the hole
+    x0, y0, x1, y1 = bounds([q for pl in red.polylines for q in pl.points])
+    assert (x1 - x0) == pytest.approx(40.5, abs=1.5)              # 81 of 200 px at 100 mm
+    blue = next(o for o in objs if o.source_color[2] > 150)
+    assert all(pl.closed for pl in blue.polylines)
