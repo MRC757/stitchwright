@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+Fixes from a code review. Tested in code and in the preview; not yet sewn on the PE540D.
+
+### Stitches
+- **Fills follow SVG's fill rule.** Where two parts of one shape overlap and are drawn the
+  same way, the overlap is now filled instead of left as a hole, as SVG and fonts mean it
+  (some fonts, such as Bahnschrift, draw many letters this way). A shape marked
+  `fill-rule="evenodd"` in the SVG still gets holes in its overlaps. Holes such as the middle
+  of an "o" stay empty. Projects remember each shape's rule.
+- **Cut-out fills overlap a little**: a fill under a filled shape stacked on top now reaches
+  0.4 mm under it, so fabric pulled in by the stitches can't show between the two.
+- **Warnings for imported stitches** that have been resized beyond 80–120% (they keep their
+  number, so they spread apart or pack together) or that include stitches over 12 mm.
+- **Long satin borders plan much faster** (a 1 m curvy border: from over 2 seconds to a
+  hundredth of one), so the window keeps up while you arrange them.
+
+### Designing
+- **Opening a picture no longer loses the current design** if you cancel the import dialog
+  or the picture can't be traced.
+- **Phone photos are traced the right way up** (their stored rotation is followed).
+- **Keyboard shortcuts work with Caps Lock on.** Before, Ctrl+Z redid, Ctrl+S saved the
+  project instead of the PES and Ctrl+G ungrouped, and the other shortcuts did nothing.
+- The title bar marks unsaved changes with a dot.
+- Opening a project selects its hoop size in the hoop list.
+- Save PES (Ctrl+S) says why when it can't save, instead of doing nothing.
+- Projects saved by a later version, with settings this one doesn't know, still open.
+
+### Command line
+- `--speed 0` and a pull compensation outside 0–1 mm are refused with a plain message
+  (`--speed 0` used to crash).
+
+### Building
+- The Windows app is built from pinned library versions (`requirements.txt`), so every
+  build of a release is the same. The automatic checks run on Python 3.10, 3.12 and 3.14.
+
 ## 0.2.2 (2026-11-12)
 
 - Version tags now publish a GitHub Release with `stitchwright.exe` attached.
