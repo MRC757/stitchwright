@@ -24,6 +24,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .geometry import drop_close, subdivide
+
 Point = tuple[float, float]
 RGB = tuple[int, int, int]
 
@@ -79,13 +81,6 @@ def _row_points(xa: float, xb: float, y: float, grid_off: float, L: float,
     if xa > xb:
         inner.reverse()
     return [(xa, y)] + [(x, y) for x in inner] + [(xb, y)]
-
-
-def _split(a: Point, b: Point, L: float) -> list[Point]:
-    """Points after a on the way to b, so no step is longer than L."""
-    d = math.dist(a, b)
-    n = max(1, math.ceil(d / L))
-    return [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(1, n + 1)]
 
 
 def _crossings(edges, y) -> list[float]:
@@ -166,7 +161,7 @@ def _serpentine(rows, L: float, min_len: float, stagger: bool = True) -> list[li
                 off = (r % 3) * L / 3 if stagger else 0.0
                 row = _row_points(start, end, y, off, L, min_len)
                 if path:
-                    path.extend(_split(path[-1], row[0], L))   # step down to this row
+                    path.extend(subdivide(path[-1], row[0], L))   # step down to this row
                     path.extend(row[1:])
                 else:
                     path.extend(row)
@@ -185,21 +180,8 @@ def _serpentine(rows, L: float, min_len: float, stagger: bool = True) -> list[li
                 if best is None:
                     break
                 r, j, rightward = r + 1, best[1], not rightward
-            paths.append(_drop_close(path, min_len))
+            paths.append(drop_close(path, min_len))
     return [p for p in paths if len(p) >= 2]
-
-
-def _drop_close(path, min_len):
-    clean = [path[0]]
-    for p in path[1:-1]:
-        if math.dist(p, clean[-1]) >= min_len:
-            clean.append(p)
-    if len(path) > 1:
-        if len(clean) > 1 and math.dist(path[-1], clean[-1]) < min_len:
-            clean[-1] = path[-1]
-        else:
-            clean.append(path[-1])
-    return clean
 
 
 def _unrotate(paths, cs):
@@ -266,7 +248,7 @@ def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0) -> list[list
             here = a
             for p in route + [b]:
                 if math.dist(here, p) > 1e-6:
-                    out[-1].extend(_split(here, p, L))
+                    out[-1].extend(subdivide(here, p, L))
                     here = p
             out[-1].extend(nxt[1:])
             joined = True
@@ -384,4 +366,4 @@ def satin_path(points, closed: bool, spec: SatinSpec, min_len: float = 0.4) -> l
             pts = pts[::-1]
     for piece in _split_at_corners(pts):
         out += _zigzag(piece, half, spec.spacing)
-    return _drop_close(out, min_len * 0.5)
+    return drop_close(out, min_len * 0.5)

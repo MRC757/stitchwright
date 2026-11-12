@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image, ImageFilter
 
+from .geometry import chaikin, polygon_area, simplify
 from .svg_import import DesignObject, Polyline
 
 MAX_PIXELS = 320          # long side, after shrinking: plenty for embroidery-sized shapes
@@ -153,51 +154,12 @@ def _straighten(ring):
     return out
 
 
-def _rdp(pts, tol):
-    """Ramer-Douglas-Peucker simplification (iterative, so long outlines are fine)."""
-    if len(pts) < 3:
-        return list(pts)
-    keep = [False] * len(pts)
-    keep[0] = keep[-1] = True
-    stack = [(0, len(pts) - 1)]
-    while stack:
-        i0, i1 = stack.pop()
-        a, b = pts[i0], pts[i1]
-        dx, dy = b[0] - a[0], b[1] - a[1]
-        n = math.hypot(dx, dy)
-        best, idx = -1.0, 0
-        for i in range(i0 + 1, i1):
-            p = pts[i]
-            d = (abs(dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / n) if n > 1e-12 else math.dist(p, a)
-            if d > best:
-                best, idx = d, i
-        if best > tol:
-            keep[idx] = True
-            stack += [(i0, idx), (idx, i1)]
-    return [p for p, k in zip(pts, keep) if k]
-
-
 def _simplify_ring(ring, tol):
     """RDP for a closed ring: split it at the point farthest from the start."""
     far = max(range(len(ring)), key=lambda i: math.dist(ring[i], ring[0]))
-    a = _rdp(ring[:far + 1], tol)
-    b = _rdp(ring[far:], tol)
+    a = simplify(ring[:far + 1], tol)
+    b = simplify(ring[far:], tol)
     return a[:-1] + b
-
-
-def _chaikin_closed(pts, rounds=2):
-    for _ in range(rounds):
-        ring = pts[:-1]
-        out = []
-        for a, b in zip(ring, ring[1:] + ring[:1]):
-            out.append((0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]))
-            out.append((0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]))
-        pts = out + [out[0]]
-    return pts
-
-
-def _area(pts) -> float:
-    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:]))) / 2
 
 
 def trace_image(path: str, s: TraceSettings) -> tuple[list[DesignObject], list[str]]:
@@ -215,12 +177,12 @@ def trace_image(path: str, s: TraceSettings) -> tuple[list[DesignObject], list[s
             continue
         polys = []
         for ring in _rings(mask):
-            if _area(ring) < min_px:
+            if polygon_area(ring) < min_px:
                 continue
             pts = _simplify_ring(_straighten(ring), tol)
             if len(pts) < 4:
                 continue
-            pts = _chaikin_closed(pts, rounds)
+            pts = chaikin(pts, rounds, closed=True)
             polys.append(Polyline([(x * mm, y * mm) for x, y in pts], True))
         if polys:
             found.append((int(mask.sum()), rgb, polys))

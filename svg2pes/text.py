@@ -24,6 +24,7 @@ from fontTools.pens.basePen import BasePen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
+from .geometry import chaikin, subdivide
 from .svg_import import Polyline
 
 FONT_EXTENSIONS = (".ttf", ".otf", ".ttc", ".otc")
@@ -179,22 +180,6 @@ def _hershey(font_id: str):
     return f, min(ys), max(ys) - min(ys)            # font, baseline, cap height (font units)
 
 
-def _smooth(pts, rounds: int = 2):
-    """Chaikin corner cutting: rounds off the Hershey fonts' coarse polygons into
-    smooth curves (the stroke's two ends stay put)."""
-    for _ in range(rounds):
-        if len(pts) < 3:
-            return pts
-        out = [pts[0]]
-        for a, b in zip(pts, pts[1:]):
-            out.append((0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]))
-            out.append((0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]))
-        out[1] = pts[0] if math.dist(out[1], pts[0]) < 1e-9 else out[1]
-        out.append(pts[-1])
-        pts = out
-    return pts
-
-
 def _hershey_line(spec, text, height, missing):
     font_id = spec.font_path[len(HERSHEY_PREFIX):]
     try:
@@ -216,7 +201,7 @@ def _hershey_line(spec, text, height, missing):
         for st in strokes:
             pts = [(x + px * k, -(py - base) * k) for px, py in st]
             if len(pts) >= 2:
-                polys.append(Polyline(_smooth(pts), False))
+                polys.append(Polyline(chaikin(pts, 2), False))
         x += adv * k + max(spec.spacing_mm, 0) + cap * 0.08 * k
     return polys, x, 100 * k
 
@@ -238,8 +223,7 @@ def _densify(polys, step=0.5):
     for pl in polys:
         out = [pl.points[0]]
         for a, b in zip(pl.points, pl.points[1:]):
-            n = max(1, math.ceil(math.dist(a, b) / step))
-            out += [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(1, n + 1)]
+            out += subdivide(a, b, step)
         pl.points = out
 
 

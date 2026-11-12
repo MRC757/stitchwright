@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from .fill import closed_rings, fill_paths, satin_path
+from .geometry import drop_close, simplify
 from .svg_import import DesignObject, Point
 
 RGB = tuple[int, int, int]
@@ -60,50 +61,6 @@ class ColorBlock:
     runs: list[Run] = field(default_factory=list)
 
 
-def _simplify(points: list[Point], tol: float) -> np.ndarray:
-    """Ramer-Douglas-Peucker on an open polyline (closed ones repeat their first point)."""
-    pts = np.asarray(points, dtype=float)
-    if len(pts) < 3 or tol <= 0:
-        return pts
-    keep = np.zeros(len(pts), dtype=bool)
-    keep[0] = keep[-1] = True
-    stack = [(0, len(pts) - 1)]
-    while stack:
-        a, b = stack.pop()
-        if b <= a + 1:
-            continue
-        seg = pts[b] - pts[a]
-        norm = np.hypot(*seg)
-        rel = pts[a + 1:b] - pts[a]
-        if norm < 1e-12:
-            d = np.hypot(rel[:, 0], rel[:, 1])
-        else:
-            d = np.abs(seg[0] * rel[:, 1] - seg[1] * rel[:, 0]) / norm
-        i = int(np.argmax(d))
-        if d[i] > tol:
-            k = a + 1 + i
-            keep[k] = True
-            stack.append((a, k))
-            stack.append((k, b))
-    return pts[keep]
-
-
-def _drop_short(pts: list[Point], min_len: float) -> list[Point]:
-    """Merge needle drops closer than min_len, always keeping both ends."""
-    if min_len <= 0 or len(pts) < 3:
-        return pts
-    out = [pts[0]]
-    for p in pts[1:-1]:
-        if math.dist(p, out[-1]) >= min_len:
-            out.append(p)
-    last = pts[-1]
-    if len(out) > 1 and math.dist(last, out[-1]) < min_len:
-        out[-1] = last          # move the final drop onto the true end point
-    else:
-        out.append(last)
-    return out
-
-
 def resample(points: np.ndarray, spacing: float, corner_deg: float,
              min_len: float = 0.0) -> list[Point]:
     """Place needle drops at roughly even spacing, keeping sharp corners, and
@@ -135,7 +92,7 @@ def resample(points: np.ndarray, spacing: float, corner_deg: float,
         xs = np.interp(targets, cum, seg[:, 0])
         ys = np.interp(targets, cum, seg[:, 1])
         out.extend(zip(xs.tolist(), ys.tolist()))
-    return _drop_short(out, min_len)
+    return drop_close(out, min_len)
 
 
 def _path_length(pts: list[Point]) -> float:
@@ -148,10 +105,10 @@ def _make_runs(obj: DesignObject, s: Settings) -> list[Run]:
         pts = list(pl.points)
         if pl.closed and math.dist(pts[0], pts[-1]) > 1e-9:
             pts.append(pts[0])
-        simp = _simplify(pts, s.tolerance)
-        if len(simp) < 2 or _path_length([tuple(p) for p in simp]) < s.min_run:
+        simp = simplify(pts, s.tolerance)
+        if len(simp) < 2 or _path_length(simp) < s.min_run:
             continue
-        runs.append(Run([tuple(p) for p in simp], pl.closed, obj.obj_id))
+        runs.append(Run(simp, pl.closed, obj.obj_id))
     return runs
 
 

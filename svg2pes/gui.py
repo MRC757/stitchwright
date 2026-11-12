@@ -26,7 +26,8 @@ from PIL import Image, ImageTk
 from .convert import (ConversionError, Plan, format_minutes, outside_hoop, plan_design,
                       write_pes_file)
 from . import __version__
-from .geometry import IDENTITY, Affine, apply, bounds, chain, rotate, scale, translate
+from .geometry import (IDENTITY, Affine, apply, bounds, chain, point_in_polygon,
+                       polygon_area, rotate, scale, segment_distance, translate)
 from .log import RepeatGuard, default_log_dir, log, setup_logging
 from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
 from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
@@ -96,29 +97,6 @@ def _centre_on(win: tk.Toplevel, parent):
     win.geometry(f"+{max(px, 0)}+{max(py, 0)}")
 
 
-def _seg_dist(p, a, b) -> float:
-    ax, ay = a
-    bx, by = b
-    dx, dy = bx - ax, by - ay
-    L2 = dx * dx + dy * dy
-    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / L2))
-    return math.dist(p, (ax + t * dx, ay + t * dy))
-
-
-def _inside(p, pts) -> bool:
-    x, y = p
-    inside = False
-    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
-            inside = not inside
-    return inside
-
-
-def _area(pts) -> float:
-    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:]))) / 2
-
-
-# --------------------------------------------------------------------- dialogs
 class ThreadPicker(tk.Toplevel):
     """Modal grid of the 61 chart threads. After wait(), .result is a Thread,
     the string "reset" (back to the nearest match), or None (cancelled)."""
@@ -2106,11 +2084,11 @@ class App:
             if oid in self.skipped:
                 continue
             for pts in self.placed.get(oid, []):
-                d = min((_seg_dist(p, a, b) for a, b in zip(pts, pts[1:])), default=1e9)
+                d = min((segment_distance(p, a, b) for a, b in zip(pts, pts[1:])), default=1e9)
                 if d <= tol:
                     score = d
-                elif len(pts) > 3 and math.dist(pts[0], pts[-1]) < 1e-6 and _inside(p, pts):
-                    score = tol + _area(pts)          # prefer the smallest shape clicked inside
+                elif len(pts) > 3 and math.dist(pts[0], pts[-1]) < 1e-6 and point_in_polygon(p, pts):
+                    score = tol + polygon_area(pts)          # prefer the smallest shape clicked inside
                 else:
                     continue
                 if best is None or score < best[0]:
