@@ -4,7 +4,7 @@ import math
 import pyembroidery
 import pytest
 
-from conftest import SAMPLE, square, stitch_lengths, write_svg
+from conftest import SAMPLE, hole, square, stitch_lengths, write_svg
 from stitchwright.convert import ConversionError, convert, plan_design
 from stitchwright.stitching import Run, Settings, resample, stitch_points
 from stitchwright.svg_import import load_svg
@@ -58,12 +58,75 @@ def test_fill_covers_a_rectangle_with_rows():
 
 def test_fill_leaves_holes_empty_and_follows_the_angle():
     from stitchwright.fill import FillSpec, fill_paths
-    ring = [square(0, 0, 20, 20), square(6, 6, 14, 14)]
+    ring = [square(0, 0, 20, 20), hole(6, 6, 14, 14)]
     paths = fill_paths(ring, FillSpec(angle=30, spacing=0.4, underlay=False))
     pts = [p for path in paths for p in path]
     inside_hole = [p for p in pts if 6.3 < p[0] < 13.7 and 6.3 < p[1] < 13.7]
     assert pts and not inside_hole
     assert len(paths) >= 2                                   # the hole splits the rows
+
+
+def _points_in(paths, x0, y0, x1, y1):
+    return [p for path in paths for p in path if x0 < p[0] < x1 and y0 < p[1] < y1]
+
+
+def test_overlapping_contours_drawn_the_same_way_are_filled_unless_svg_says_evenodd(tmp_path):
+    """SVG's default fill rule is nonzero: where two parts of one path overlap and wind
+    the same way, the overlap is solid. fill-rule="evenodd" makes it a hole."""
+    from stitchwright.fill import FillSpec, fill_paths
+    d = 'd="M0,0 H20 V20 H0 Z M10,10 H30 V30 H10 Z"'
+    svg = write_svg(tmp_path, f'<path id="n" fill="#f00" {d}/>'
+                              f'<g style="fill-rule:evenodd"><path id="e" fill="#00f" {d}/></g>')
+    nonzero, evenodd = load_svg(svg).objects
+    assert nonzero.fill_rule == "nonzero" and evenodd.fill_rule == "evenodd"
+    spec = FillSpec(angle=0, underlay=False)
+    assert _points_in(fill_paths(nonzero.polylines, spec, rule=nonzero.fill_rule), 12, 12, 18, 18)
+    assert not _points_in(fill_paths(evenodd.polylines, spec, rule=evenodd.fill_rule),
+                          10.5, 10.5, 19.5, 19.5)
+
+
+@pytest.mark.parametrize("rule", ["nonzero", "evenodd"])
+def test_a_hole_wound_the_other_way_is_empty_under_either_rule(rule):
+    from stitchwright.fill import FillSpec, fill_paths
+    paths = fill_paths([square(0, 0, 20, 20), hole(6, 6, 14, 14)],
+                       FillSpec(angle=0, underlay=True), rule=rule, hidden=False)
+    assert _points_in(paths, 1, 1, 5, 19)
+    assert not _points_in(paths, 6.5, 6.5, 13.5, 13.5)
+
+
+def test_a_same_way_inner_square_is_solid_under_nonzero_and_a_hole_under_evenodd():
+    from stitchwright.fill import FillSpec, fill_paths
+    shape = [square(0, 0, 20, 20), square(6, 6, 14, 14)]
+    spec = FillSpec(angle=0, underlay=False)
+    assert _points_in(fill_paths(shape, spec, rule="nonzero"), 7, 7, 13, 13)
+    assert not _points_in(fill_paths(shape, spec, rule="evenodd"), 6.5, 6.5, 13.5, 13.5)
+
+
+def test_flipping_an_object_does_not_change_what_is_filled():
+    """Mirroring reverses every contour together, so the nonzero rule fills the same areas."""
+    from stitchwright.document import Document
+    from stitchwright.fill import FillSpec
+    from stitchwright.svg_import import Design, DesignObject
+    from stitchwright.stitching import plan_blocks
+    # two overlapping squares wound the same way, with a hole in the second; the
+    # document centres it in the hoop: squares at -15..5 and -5..15, hole at 0..10
+    # (the hole's corner over the first square is still sewn: wound +1 +1 -1)
+    shape = DesignObject(1, "s", "Path", (255, 0, 0),
+                         [square(-20, -20, 0, 0), square(-10, -10, 10, 10), hole(-5, -5, 5, 5)],
+                         color=(255, 0, 0))
+    doc = Document()
+    doc.load_design(Design([shape], []), "x.svg")
+    doc.set_stitches(["s"], FillSpec(angle=0, underlay=False), True, None)
+
+    def fill_points():
+        blocks = plan_blocks(doc.build_design()[0].active(), Settings())
+        return [[p for b in blocks for r in b.runs if r.fill for p in r.points]]
+
+    assert _points_in(fill_points(), -4.5, -4.5, -0.5, -0.5)      # the overlap is sewn
+    assert not _points_in(fill_points(), 5.5, 5.5, 9.5, 9.5)      # the hole is not
+    doc.flip(["s"], horizontal=True)                              # about x = 0
+    assert _points_in(fill_points(), 0.5, -4.5, 4.5, -0.5)
+    assert not _points_in(fill_points(), -9.5, 5.5, -5.5, 9.5)
 
 
 def test_fills_sew_before_outlines_and_share_a_block(tmp_path):

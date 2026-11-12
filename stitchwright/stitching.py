@@ -175,7 +175,8 @@ def _overlap(a, b) -> bool:
 
 
 def _fill_runs(obj: DesignObject, s: Settings, cutouts=None) -> list[Run]:
-    paths = fill_paths(obj.polylines, obj.fill, s.min_stitch, cutouts, hidden=obj.outline)
+    paths = fill_paths(obj.polylines, obj.fill, s.min_stitch, cutouts, hidden=obj.outline,
+                       rule=obj.fill_rule)
     return [Run(p, False, obj.obj_id, kind="fill") for p in paths if len(p) >= 2]
 
 
@@ -228,7 +229,7 @@ def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
         if o.fill is not None:
             rings = closed_rings(o.polylines)
             if rings:
-                filled.append((i, rings, _bbox(rings)))
+                filled.append((i, rings, _bbox(rings), o.fill_rule))
 
     parts: list[tuple] = []         # (colour, units, 0 = fill / 1 = outline)
     for idx, obj in enumerate(objects):
@@ -242,7 +243,8 @@ def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
             if s.knockout:
                 mine = closed_rings(obj.polylines)
                 box = _bbox(mine) if mine else None
-                cut = [rings for j, rings, b in filled if j > idx and box and _overlap(box, b)]
+                cut = [(rings, rule) for j, rings, b, rule in filled
+                       if j > idx and box and _overlap(box, b)]
             runs = _fill_runs(obj, s, cut)
             if runs:
                 parts.append((obj.fill.color or obj.color, [runs], 0))

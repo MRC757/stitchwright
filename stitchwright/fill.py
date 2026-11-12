@@ -1,8 +1,9 @@
 """Fill stitching ("tatami") and satin columns.
 
 Fill: rows of stitches back and forth across a closed shape. The shape's
-closed outlines are filled with the even-odd rule, so holes (the middle of an
-'o', a ring) stay empty. Rows run at `angle` degrees, `spacing` mm apart.
+closed outlines are filled with the nonzero rule (SVG's and fonts' default; a
+shape can ask for even-odd), so holes (the middle of an 'o', a ring) stay empty
+while overlapping parts drawn the same way stay solid. Rows run at `angle` degrees, `spacing` mm apart.
 Needle points along a row sit on a grid that shifts by a third of a stitch each
 row, so they don't line up into visible ridges.
 
@@ -24,13 +25,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .geometry import drop_close, point_in_polygon, subdivide
+from .geometry import drop_close, point_in_polygon, subdivide, winding_number
 
 Point = tuple[float, float]
 RGB = tuple[int, int, int]
 
 CLOSE_GAP_MM = 0.5     # outlines whose ends are this close count as closed
 MAX_TRAVEL_MM = 40.0   # longer trips along the edge are left as jumps
+NONZERO, EVENODD = "nonzero", "evenodd"    # fill rules, as SVG names them
 
 
 @dataclass(frozen=True)
@@ -83,9 +85,23 @@ def _row_points(xa: float, xb: float, y: float, grid_off: float, L: float,
     return [(xa, y)] + [(x, y) for x in inner] + [(xb, y)]
 
 
-def _crossings(edges, y) -> list[float]:
-    return sorted(x1 + (y - y1) * (x2 - x1) / (y2 - y1)
-                  for x1, y1, x2, y2 in edges if (y1 <= y < y2) or (y2 <= y < y1))
+def _spans(edges, y, rule: str = NONZERO) -> list[tuple[float, float]]:
+    """The intervals of row y inside the shape, sorted. Under the nonzero rule (SVG's
+    and fonts' default) a point is inside if the outlines wind round it at all, so
+    overlapping contours drawn the same way stay solid; under even-odd it is inside
+    if it is enclosed an odd number of times, so every overlap is a hole."""
+    xs = sorted((x1 + (y - y1) * (x2 - x1) / (y2 - y1), 1 if y2 > y1 else -1)
+                for x1, y1, x2, y2 in edges if (y1 <= y < y2) or (y2 <= y < y1))
+    out, wind, start = [], 0, None
+    for n, (x, d) in enumerate(xs, 1):
+        wind += d
+        inside = wind != 0 if rule == NONZERO else n % 2 == 1
+        if inside and start is None:
+            start = x
+        elif not inside and start is not None:
+            out.append((start, x))
+            start = None
+    return out
 
 
 def _subtract(segs, cuts):
@@ -108,8 +124,9 @@ def _subtract(segs, cuts):
     return out
 
 
-def _rows(rings, cutouts, angle, spacing, inset=0.0, extend=0.0):
-    """Row segments of the shape in a frame where rows are horizontal.
+def _rows(rings, cutouts, angle, spacing, inset=0.0, extend=0.0, rule=NONZERO):
+    """Row segments of the shape in a frame where rows are horizontal. cutouts is a
+    list of (rings, rule), one per shape whose area is left out.
     Returns (rows, (cos, sin)); rows is a list of (y, [(x0, x1), ...])."""
     a = math.radians(angle)
     co, si = math.cos(a), math.sin(a)
@@ -121,7 +138,8 @@ def _rows(rings, cutouts, angle, spacing, inset=0.0, extend=0.0):
         return [(p[0], p[1], q[0], q[1]) for ring in rs for p, q in zip(ring, ring[1:]) if p[1] != q[1]]
 
     edges = edges_of([rot(r) for r in rings])
-    cut_edges = [edges_of([rot(r) for r in obj_rings]) for obj_rings in (cutouts or [])]
+    cut_edges = [(edges_of([rot(r) for r in obj_rings]), obj_rule)
+                 for obj_rings, obj_rule in (cutouts or [])]
     if not edges:
         return [], (co, si)
     ymin = min(min(e[1], e[3]) for e in edges)
@@ -129,13 +147,10 @@ def _rows(rings, cutouts, angle, spacing, inset=0.0, extend=0.0):
     rows = []
     y = ymin + spacing / 2
     while y < ymax:
-        xs = _crossings(edges, y)
-        segs = [(xs[i] - extend + inset, xs[i + 1] + extend - inset)
-                for i in range(0, len(xs) - 1, 2)]
+        segs = [(a - extend + inset, b + extend - inset) for a, b in _spans(edges, y, rule)]
         segs = [(p, q) for p, q in segs if q - p > 1e-6]
-        for ce in cut_edges:
-            cx = _crossings(ce, y)
-            cuts = [(cx[i], cx[i + 1]) for i in range(0, len(cx) - 1, 2)]
+        for ce, ce_rule in cut_edges:
+            cuts = _spans(ce, y, ce_rule)
             if cuts:
                 segs = _subtract(segs, cuts)
         rows.append((y, [(p, q) for p, q in segs if q - p > 0.3]))
@@ -263,31 +278,36 @@ TRAVEL_INSET_MM = 0.3   # travel stitches sit this far inside a fill that has no
 
 
 def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
-               cutouts=None, hidden: bool = True) -> list[list[Point]]:
+               cutouts=None, hidden: bool = True, rule: str = NONZERO) -> list[list[Point]]:
     """Needle-point paths that fill the closed outlines in `polylines` (mm):
     underlay first (if any), then the top fill, joined by travel where possible.
-    cutouts: for each filled shape stacked above, its rings (areas left out).
+    cutouts: for each filled shape stacked above, (its rings, its fill rule): areas
+    left out.
     hidden: an outline will be sewn on top, covering travel stitches along the edge;
-    if not, travel runs a little inside the fill instead, where the fill covers it."""
+    if not, travel runs a little inside the fill instead, where the fill covers it.
+    rule: which areas the outlines enclose, NONZERO (SVG's default) or EVENODD."""
     rings = closed_rings(polylines)
     if not rings or spec.spacing <= 0 or spec.stitch_len <= 0:
         return []
     paths = []
     if spec.underlay:
-        rows, cs = _rows(rings, cutouts, spec.angle + 90, max(2.0, spec.spacing * 5), inset=0.6)
+        rows, cs = _rows(rings, cutouts, spec.angle + 90, max(2.0, spec.spacing * 5), inset=0.6,
+                         rule=rule)
         paths += _unrotate(_serpentine(rows, min(3.0, spec.stitch_len), min_len, stagger=False), cs)
-    rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp)
+    rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp, rule=rule)
     paths += _unrotate(_serpentine(rows, spec.stitch_len, min_len), cs)
-    travel = rings if hidden else [inset_ring(r, rings, TRAVEL_INSET_MM) for r in rings]
+    travel = rings if hidden else [inset_ring(r, rings, TRAVEL_INSET_MM, rule) for r in rings]
     return travel_join(paths, travel, L=2.5)
 
 
-def _inside_fill(p, rings) -> bool:
-    """Even-odd: is p inside the area the rings enclose (holes excluded)?"""
+def _inside_fill(p, rings, rule: str = NONZERO) -> bool:
+    """Is p inside the area the rings enclose (holes excluded), under the fill rule?"""
+    if rule == NONZERO:
+        return sum(winding_number(p, r) for r in rings) != 0
     return sum(point_in_polygon(p, r) for r in rings) % 2 == 1
 
 
-def inset_ring(ring, rings, dist: float) -> list[Point]:
+def inset_ring(ring, rings, dist: float, rule: str = NONZERO) -> list[Point]:
     """The ring moved dist mm into the filled area (outer edges move in, holes grow).
     Each corner moves to where its two edges, each offset by dist, meet (a miter),
     so the result stays dist from every edge; very sharp corners are capped."""
@@ -310,7 +330,7 @@ def inset_ring(ring, rings, dist: float) -> list[Point]:
         if mlen > 3:                                     # cap the miter at sharp corners
             m = (m[0] * 3 / mlen, m[1] * 3 / mlen)
         q = (p[0] + m[0] * dist, p[1] + m[1] * dist)
-        if not _inside_fill(q, rings):
+        if not _inside_fill(q, rings, rule):
             q = (p[0] - m[0] * dist, p[1] - m[1] * dist)
         out.append(q)
     return out + [out[0]]

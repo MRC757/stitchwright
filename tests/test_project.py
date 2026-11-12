@@ -52,6 +52,19 @@ def test_project_from_a_later_version_with_new_settings_still_opens():
     assert q.texts[ids[2]].text == "Hi" and q.texts[ids[2]].height_mm == 12.0
 
 
+def test_project_keeps_each_objects_fill_rule():
+    from dataclasses import replace
+    from stitchwright.project import Project, from_dict, to_dict
+    d = load_svg(SAMPLE)
+    objs = [replace(d.objects[0], fill_rule="evenodd")] + d.objects[1:]
+    data = to_dict(Project(objs))
+    q = from_dict(data)
+    assert [o.fill_rule for o in q.objects] == ["evenodd"] + ["nonzero"] * (len(objs) - 1)
+    for o in data["objects"]:                 # saved before fill rules were stored
+        del o["fill_rule"]
+    assert all(o.fill_rule == "nonzero" for o in from_dict(data).objects)
+
+
 def test_bad_project_file_is_refused(tmp_path):
     from stitchwright.project import load_project
     f = tmp_path / "bad.stitchwright"

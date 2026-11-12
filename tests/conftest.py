@@ -49,6 +49,13 @@ def square(x0, y0, x1, y1):
     return Polyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], True)
 
 
+def hole(x0, y0, x1, y1):
+    """A square wound the other way round from square(): a hole under either fill rule,
+    the way fonts, drawing programs and the picture tracer make holes."""
+    from stitchwright.svg_import import Polyline
+    return Polyline([(x0, y0), (x0, y1), (x1, y1), (x1, y0), (x0, y0)], True)
+
+
 @pytest.fixture(scope="session")
 def tk_root():
     """One Tk interpreter for the whole test run: creating a second tk.Tk() in the same

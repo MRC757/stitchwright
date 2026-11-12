@@ -53,6 +53,7 @@ def _obj_to_dict(o: DesignObject) -> dict:
     # floats are written exactly: JSON round-trips them precisely
     return {"index": o.index, "id": o.obj_id, "kind": o.kind,
             "source_color": list(o.source_color), "stitches": o.stitches,
+            "fill_rule": o.fill_rule,
             "polylines": [{"closed": pl.closed, "points": [[float(x), float(y)] for x, y in pl.points]}
                           for pl in o.polylines]}
 
@@ -61,8 +62,11 @@ def _obj_from_dict(d: dict) -> DesignObject:
     polys = [Polyline([(float(x), float(y)) for x, y in pl["points"]], bool(pl["closed"]))
              for pl in d["polylines"]]
     rgb = tuple(int(c) for c in d["source_color"])
+    # projects saved before fill rules were stored used even-odd for everything, but
+    # nonzero is what the artwork meant (and gives the same result unless contours overlap)
+    rule = "evenodd" if d.get("fill_rule") == "evenodd" else "nonzero"
     return DesignObject(int(d["index"]), str(d["id"]), str(d["kind"]), rgb, polys, color=rgb,
-                        stitches=bool(d.get("stitches", False)))
+                        stitches=bool(d.get("stitches", False)), fill_rule=rule)
 
 
 def to_dict(p: Project) -> dict:

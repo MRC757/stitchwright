@@ -41,6 +41,7 @@ class DesignObject:
     outline: bool = True                     # sew the outline
     satin: "SatinSpec | None" = None         # sew the outline as a satin column, not a run
     stitches: bool = False                   # polylines are exact needle points (imported PES)
+    fill_rule: str = "nonzero"               # which areas a fill covers: nonzero | evenodd
 
     def bounds(self) -> tuple[float, float, float, float]:
         xs = [p[0] for pl in self.polylines for p in pl.points]
@@ -156,7 +157,9 @@ def load_svg(path: str) -> Design:
             continue
 
         obj_id = _unique_id(el.id or f"obj{idx}", el.id, seen_ids, all_ids)
-        obj = DesignObject(idx, obj_id, name, color, polys, color=color)
+        # svgelements resolves fill-rule from the attribute, style or a parent group
+        rule = "evenodd" if el.values.get("fill-rule") == "evenodd" else "nonzero"
+        obj = DesignObject(idx, obj_id, name, color, polys, color=color, fill_rule=rule)
         objects.append(obj)
 
     if not objects:

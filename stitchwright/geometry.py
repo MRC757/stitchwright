@@ -142,6 +142,17 @@ def point_in_polygon(p: Point, pts) -> bool:
     return inside
 
 
+def winding_number(p: Point, pts) -> int:
+    """How many times a closed polyline (first point repeated at the end) winds
+    around p, counting direction: 0 means outside under the nonzero rule."""
+    x, y = p
+    w = 0
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            w += 1 if y2 > y1 else -1
+    return w
+
+
 def polygon_area(pts) -> float:
     """Area enclosed by a closed polyline (first point repeated at the end)."""
     return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:]))) / 2

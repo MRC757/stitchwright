@@ -578,7 +578,7 @@ class Document:
             cx, cy = (ob[0] + ob[2]) / 2, (ob[1] + ob[3]) / 2
             polys = [Polyline([(x + cx, y + cy) for x, y in pl.points], pl.closed) for pl in polys]
         self.text_objs[oid] = DesignObject(o.index, oid, "Text", o.source_color, polys,
-                                           color=o.source_color)
+                                           color=o.source_color, fill_rule=o.fill_rule)
         self.texts[oid] = spec
         self.last_text = spec
         return missing
@@ -628,7 +628,7 @@ class Document:
                                      fill=self.placed_fill(oid),
                                      outline=oid not in self.no_outline,
                                      satin=self.satins.get(oid),
-                                     stitches=o.stitches))
+                                     stitches=o.stitches, fill_rule=o.fill_rule))
         return Design(objs, list(self.warnings)), placed
 
     def plan(self, settings: Settings) -> PlanResult:
