@@ -9,7 +9,7 @@ and filled areas (tatami fill with underlay).
 
 Stitchwright was called *svg2pes* before version 0.2.1.
 
-![Stitchwright window](docs/screenshot.png)
+![The Stitchwright window: a butterfly with filled wings and "Spring" lettering filled in Pumpkin with a Black outline, ready to save as a PES file](docs/screenshot.png)
 
 ## Features
 
