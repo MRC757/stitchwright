@@ -30,7 +30,10 @@ not built yet.
   simulation that stitches the design in machine order and stops at each colour change.
 - Checks that everything fits inside the hoop and its margin, and checks each saved file by
   reading it back.
-- Comes with a desktop window and a command line. Both use the same conversion code.
+- Comes with a desktop window (also as a single Windows `.exe`) and a command line. Both use
+  the same conversion code.
+
+See [Future features](#future-features) for what is planned next.
 
 ## Windows app (.exe)
 
@@ -157,25 +160,84 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
    made with the current code, with the sun in 214 Deep Gold.
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
+**What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
+(`samples/sample.pes`) loads and is read by the PE540D. Fills, added text and arranged
+layouts are tested in code and in the preview, but have not been sewn yet. Sew a test
+piece before using them on a real project.
+
 ## Limitations
 
 - Fills are plain tatami: there is no underlay or pull compensation yet, so use a firm
   stabiliser. On stretchy fabric a fill can pull in slightly from its outline.
 - Where filled shapes overlap, both fills are sewn (one on top of the other). The overlap is
   not cut out of the lower fill.
+- A fill's row angle is measured in the hoop, so rotating a filled object doesn't turn its
+  rows with it. Set the angle in **Fill…** after rotating.
 - Satin stitch (for borders and small text) is not built yet.
 - Text inside the SVG, images, gradients and opacity are ignored. Use **Add text…** for
   lettering, or convert text to paths in your drawing program.
-- Added text is sewn as letter outlines. Small text (under about 8 mm) gets crowded, and
-  kerning is not applied.
-- The arrangement isn't saved with the PES: closing the window loses the layout, so save the
-  PES before you close.
+- Added text uses outline fonts, sewn as letter outlines or filled. Small text (under about
+  8 mm) gets crowded, and kerning is not applied.
+- There is no project file yet. A PES file can't be opened again for editing, and closing the
+  window loses the layout, threads, fills and text. Save the PES before you close.
 - The PE540D has no automatic thread cutter, so it most likely ignores the trim codes written
   for long jumps. Snip those threads by hand after sewing.
 - SVGs saved at 72 dpi (some Illustrator exports) come out about 25% smaller than intended.
   Use `--width`, or the size boxes in the Arrange tab.
-- Grouping by colour changes the sewing order. With outlines only this hardly matters, but
-  once fills arrive, objects that overlap will be sewn in their SVG order.
+- Grouping by colour changes the sewing order. All fills are sewn before all outlines, but
+  overlapping fills in different threads may not follow the SVG's stacking order. Use
+  *Keep drawing order* (Stitching tab, or `--keep-order`) when stacking matters. It
+  usually adds colour changes.
+
+## Future features
+
+Ideas for later versions, roughly in order of importance. Tick them off as they are done.
+
+### Better sewing quality
+- [ ] **Fill underlay:** a light layer of stitches under each fill (an edge run plus sparse
+      rows across) so the fill lies flat and doesn't sink into the fabric.
+- [ ] **Pull compensation:** widen fills slightly so they don't pull in from their outlines.
+- [ ] **Satin stitch:** smooth zig-zag columns for borders, outlines of a set width and
+      small lettering.
+- [ ] **Cut out overlaps:** cut the area under an upper shape out of the fill below, so
+      fills don't pile up into stiff patches.
+- [ ] **Travel stitches instead of jumps:** run hidden stitches under a fill to reach the
+      next row or shape. The PE540D has no thread cutter, so every jump is a thread to snip.
+- [ ] **Smarter sewing order:** let the user drag colour stops into order, and choose the
+      order that needs the fewest colour changes and jumps.
+- [ ] **Fill angle follows rotation:** keep a fill's row direction relative to its object.
+
+### Designing and editing
+- [ ] **Project files:** save and reopen a layout (objects, threads, fills, text) to keep
+      working on it later.
+- [ ] **Open PES files:** load an existing design to view it, simulate it or recolour it.
+- [ ] **Copy, paste and duplicate**, plus **mirror/flip**, **align and distribute**, and
+      **group/ungroup**.
+- [ ] **Text from the SVG:** stitch `<text>` elements with the matching installed font
+      instead of ignoring them.
+- [ ] **Single-line (stroke) fonts and monograms** for small, clean lettering.
+- [ ] **Text on a curve** (arched names and badges).
+- [ ] **Image import:** PNG/JPEG reduced to a few thread colours and traced into shapes.
+- [ ] **Hoop presets** (Brother 4" × 4" and others) and an **inches/mm** switch.
+- [ ] **Spot the 72 dpi problem:** warn when an SVG's size looks like a 72 dpi export.
+
+### Machine and output
+- [ ] **Other formats:** DST, JEF, EXP and VP3 (pyembroidery can write them) for other
+      machines.
+- [ ] **Thread and time estimates:** thread used per colour and an estimated sewing time.
+- [ ] **Printable worksheet:** a page with the design, its size, the colour sequence and
+      the thread numbers to have ready at the machine.
+- [ ] **Other thread brands:** pick by Madeira, Sulky or Robison-Anton number, using the
+      matching columns of the Brother conversion chart.
+- [ ] **Basting box:** an optional outline around the design that holds the fabric and
+      stabiliser together while sewing.
+
+### Project and packaging
+- [ ] **Automatic tests and builds:** GitHub Actions to run the tests and build the `.exe` on
+      every push.
+- [ ] **Tests for the window** (selection, arranging, undo) to go with the core tests.
+- [ ] **Installer and code signing** for the Windows app, so SmartScreen doesn't warn.
+- [ ] **macOS and Linux builds.**
 
 ## Project layout
 
