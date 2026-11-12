@@ -17,17 +17,17 @@ def app(window):
 
 def test_settings_changes_mark_the_design_modified(app, tmp_path, monkeypatch):
     app.v_margin.set("3")                      # nothing open yet: nothing to save
-    assert not app.dirty
+    assert not app.doc.dirty
     app.open(SAMPLE)
-    assert not app.dirty                       # opening isn't a change
+    assert not app.doc.dirty                       # opening isn't a change
     app.v_margin.set("4")
-    assert app.dirty
+    assert app.doc.dirty
     proj = str(tmp_path / "p.svg2pes")
     monkeypatch.setattr(gui.filedialog, "asksaveasfilename", lambda **k: proj)
     assert app.save_project()
-    assert not app.dirty
+    assert not app.doc.dirty
     app.v_pes.set("6")                         # saved in the project too
-    assert app.dirty
+    assert app.doc.dirty
     app.open(proj)                             # opening a project sets the settings ...
-    assert not app.dirty                       # ... but is not itself a change
+    assert not app.doc.dirty                       # ... but is not itself a change
     assert app.v_margin.get() == "4"

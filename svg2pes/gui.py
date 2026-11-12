@@ -5,7 +5,7 @@ Run with:  python -m svg2pes gui [design.svg]   (or double-click svg2pes_gui.pyw
 
 Objects are placed in hoop coordinates: millimetres, hoop centre at (0, 0),
 y pointing down. Each object keeps its original outline plus a transform
-(self.mats) that places it in the hoop, so moving, resizing and rotating never
+(self.doc.mats) that places it in the hoop, so moving, resizing and rotating never
 degrade the artwork and can be undone.
 """
 from __future__ import annotations
@@ -19,27 +19,25 @@ import time
 import tkinter as tk
 from dataclasses import replace
 from tkinter import filedialog, messagebox, ttk
-from tkinter import font as tkfont
 
 from PIL import Image, ImageTk
 
-from .convert import (ConversionError, Plan, format_minutes, outside_hoop, plan_design,
-                      write_pes_file)
 from . import __version__
-from .geometry import (IDENTITY, Affine, apply, bounds, chain, point_in_polygon,
-                       polygon_area, rotate, scale, segment_distance, translate)
+from .convert import ConversionError, Plan, format_minutes, write_pes_file
+from .dialogs import (ERROR_COLOUR, OK_COLOUR, SELECT_COLOUR, WARN_COLOUR, FillDialog,
+                      ImageDialog, TextDialog, ThreadPicker, swatch, ui_font)
+from .document import DocError, Document, PlanResult
+from .geometry import (Affine, apply, bounds, point_in_polygon, polygon_area, rotate, scale,
+                       segment_distance, translate)
+from .image_import import trace_image
 from .log import RepeatGuard, default_log_dir, log, setup_logging
-from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
-from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
-from .stitching import Settings
-from .svg_import import Design, DesignObject, Polyline, load_svg
-from .fill import FillSpec, SatinSpec, can_fill
-from .image_import import TraceSettings, trace_image
-from .image_import import preview as image_preview
+from .palette import thread_for_rgb, to_hex
 from .pes_import import READ_EXTENSIONS, load_stitches
+from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
 from .project import EXTENSION as PROJECT_EXTENSION
-from .project import Project, load_project, save_project
-from .text import TextSpec, default_font, installed_fonts, text_polylines
+from .project import load_project, save_project
+from .stitching import Settings
+from .svg_import import DesignObject, load_svg
 
 TITLE = "svg2pes – SVG to Brother PES"
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
@@ -50,8 +48,6 @@ HOOP_PRESETS = {                       # name -> (width, height) in mm
     "8 × 8 in (200 × 200 mm)": (200, 200),
     "8 × 12 in (200 × 300 mm)": (200, 300),
 }
-OK_COLOUR, WARN_COLOUR, ERROR_COLOUR = "#2e7d32", "#9a6700", "#c62828"
-SELECT_COLOUR = "#1a73e8"
 SHIFT, CONTROL = 0x0001, 0x0004
 SIM_SPEEDS = {"Slow": 15, "Normal": 60, "Fast": 250, "Very fast": 1200}   # stitches per second
 SIM_FRAME_MS = 33
@@ -60,593 +56,18 @@ MAX_ZOOM = 60.0
 TEXT_WIDGETS = ("Entry", "TEntry", "Text", "TCombobox", "TSpinbox", "Spinbox")
 
 
-_FONTS: dict = {}
-
-
-def ui_font(widget, size: int | None = None, bold: bool = False) -> tkfont.Font:
-    """The platform's default UI font (Segoe UI on Windows), optionally resized or bold.
-    Fonts are cached: Tk forgets a named font when its Python object is garbage-collected."""
-    key = (str(widget.tk), size, bold)
-    f = _FONTS.get(key)
-    if f is None:
-        f = tkfont.nametofont("TkDefaultFont", root=widget).copy()
-        if size:
-            f.configure(size=size)
-        if bold:
-            f.configure(weight="bold")
-        _FONTS[key] = f
-    return f
-
-
-def swatch(master, colours: list[str], size: int, gap: int = 6) -> tk.PhotoImage:
-    """A small image with one bordered square per colour, side by side."""
-    w = size * len(colours) + gap * (len(colours) - 1)
-    img = tk.PhotoImage(master=master, width=w, height=size)
-    x = 0
-    for c in colours:
-        img.put("#777777", to=(x, 0, x + size, size))
-        img.put(c, to=(x + 1, 1, x + size - 1, size - 1))
-        x += size + gap
-    return img
-
-
-def _centre_on(win: tk.Toplevel, parent):
-    win.update_idletasks()
-    px = parent.winfo_rootx() + (parent.winfo_width() - win.winfo_width()) // 2
-    py = parent.winfo_rooty() + (parent.winfo_height() - win.winfo_height()) // 3
-    win.geometry(f"+{max(px, 0)}+{max(py, 0)}")
-
-
-class ThreadPicker(tk.Toplevel):
-    """Modal grid of the 61 chart threads. After wait(), .result is a Thread,
-    the string "reset" (back to the nearest match), or None (cancelled)."""
-
-    COLS = 4
-
-    def __init__(self, parent, ui: float, title: str, current: Thread | None,
-                 source_hex: str | None, others_same_colour: int):
-        super().__init__(parent)
-        self.title(title)
-        self.transient(parent)
-        self.resizable(False, False)
-        self.result: Thread | str | None = None
-        self.apply_all = tk.BooleanVar(value=False)
-
-        threads = brother_threads()
-        rows = math.ceil(len(threads) / self.COLS)
-        cw, ch = int(190 * ui), int(26 * ui)
-        cv = tk.Canvas(self, width=self.COLS * cw, height=rows * ch, bg="white",
-                       highlightthickness=0, cursor="hand2")
-        cv.pack(padx=10, pady=(10, 4))
-        self.info = ttk.Label(self, text="Click a thread to use it.")
-        self.info.pack(anchor="w", padx=10)
-
-        self._bg: dict[int, int] = {}
-        for i, t in enumerate(threads):
-            col, row = divmod(i, rows)          # column by column, like the chart
-            x, y = col * cw, row * ch
-            tag = f"c{i}"
-            selected = current is not None and t.chart == current.chart
-            self._bg[i] = cv.create_rectangle(
-                x + 1, y + 1, x + cw - 2, y + ch - 2, fill="white",
-                outline=SELECT_COLOUR if selected else "", width=2, tags=(tag,))
-            cv.create_rectangle(x + 5, y + 4, x + 5 + int(30 * ui), y + ch - 4,
-                                fill=to_hex(t.rgb), outline="#777777", tags=(tag,))
-            cv.create_text(x + int(42 * ui), y + ch / 2, anchor="w", tags=(tag,),
-                           text=f"{t.number}  {t.name}",
-                           font=ui_font(cv, bold=selected))
-            cv.tag_bind(tag, "<Enter>", lambda e, i=i, t=t: self._hover(cv, i, t))
-            cv.tag_bind(tag, "<Leave>", lambda e, i=i: cv.itemconfigure(self._bg[i], fill="white"))
-            cv.tag_bind(tag, "<Button-1>", lambda e, t=t: self._done(t))
-
-        bottom = ttk.Frame(self, padding=(10, 6, 10, 10))
-        bottom.pack(fill="x")
-        if others_same_colour:
-            ttk.Checkbutton(
-                bottom, variable=self.apply_all,
-                text=f"Also use it for the {others_same_colour} other object(s) "
-                     f"coloured {source_hex} in the SVG").pack(anchor="w", pady=(0, 6))
-        ttk.Button(bottom, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(bottom, text="Back to nearest match",
-                   command=lambda: self._done("reset")).pack(side="right", padx=6)
-        self.bind("<Escape>", lambda e: self.destroy())
-        _centre_on(self, parent)
-
-    def _hover(self, cv, i, t: Thread):
-        cv.itemconfigure(self._bg[i], fill="#e8f0fe")
-        self.info.configure(text=f"Chart row {t.chart}  ·  Embroidery {t.number}  ·  "
-                                 f"Country {t.country}  ·  {t.name}")
-
-    def _done(self, result):
-        self.result = result
-        self.destroy()
-
-    def wait(self):
-        self.grab_set()
-        self.focus_set()
-        self.wait_window()
-        return self.result
-
-
-class TextDialog(tk.Toplevel):
-    """Modal dialog to type text and choose its font and size, with a live
-    outline preview. After wait(), .result is a TextSpec or None."""
-
-    def __init__(self, parent, ui: float, spec: TextSpec | None, editing: bool):
-        super().__init__(parent)
-        self.title("Edit text" if editing else "Add text")
-        self.transient(parent)
-        self.resizable(False, False)
-        self.ui = ui
-        self.result: TextSpec | None = None
-        self.fonts = dict(installed_fonts())
-        self.names = list(self.fonts)
-        self._job = None
-
-        if spec is None:
-            d = default_font()
-            spec = TextSpec("", d[1] if d else "", d[0] if d else "", d[2] if d else 0)
-        if spec.font_name and spec.font_name not in self.fonts and spec.font_path:
-            self.fonts[spec.font_name] = (spec.font_path, spec.font_index)
-            self.names.append(spec.font_name)
-
-        f = ttk.Frame(self, padding=10)
-        f.pack(fill="both", expand=True)
-        ttk.Label(f, text="Text").grid(row=0, column=0, sticky="nw", pady=2)
-        self.t_text = tk.Text(f, width=44, height=3, wrap="none", undo=True,
-                              font=ui_font(self, size=11))
-        self.t_text.grid(row=0, column=1, columnspan=3, sticky="we", pady=2)
-        self.t_text.insert("1.0", spec.text)
-
-        self.v_font = tk.StringVar(value=spec.font_name)
-        ttk.Label(f, text="Font").grid(row=1, column=0, sticky="w", pady=2)
-        self.c_font = ttk.Combobox(f, textvariable=self.v_font, values=self.names, width=34)
-        self.c_font.grid(row=1, column=1, columnspan=2, sticky="we", pady=2)
-        ttk.Button(f, text="Font file…", command=self._browse).grid(row=1, column=3, sticky="w", padx=(6, 0))
-
-        self.v_height = tk.StringVar(value=f"{spec.height_mm:g}")
-        self.v_spacing = tk.StringVar(value=f"{spec.spacing_mm:g}")
-        self.v_align = tk.StringVar(value=spec.align)
-        self.v_arc = tk.StringVar(value=f"{spec.arc:g}")
-        self.v_mono = tk.BooleanVar(value=spec.monogram)
-        ttk.Label(f, text="Letter height (mm)").grid(row=2, column=0, sticky="w", pady=2)
-        ttk.Entry(f, textvariable=self.v_height, width=7).grid(row=2, column=1, sticky="w")
-        ttk.Label(f, text="height of the capital letters; 8 mm or more sews best",
-                  foreground="#666666").grid(row=2, column=2, columnspan=2, sticky="w")
-        ttk.Label(f, text="Letter spacing (mm)").grid(row=3, column=0, sticky="w", pady=2)
-        ttk.Entry(f, textvariable=self.v_spacing, width=7).grid(row=3, column=1, sticky="w")
-        ttk.Label(f, text="Alignment").grid(row=4, column=0, sticky="w", pady=2)
-        af = ttk.Frame(f)
-        af.grid(row=4, column=1, columnspan=3, sticky="w")
-        for val, label in (("left", "Left"), ("center", "Centre"), ("right", "Right")):
-            ttk.Radiobutton(af, text=label, value=val, variable=self.v_align).pack(side="left", padx=(0, 8))
-        ttk.Label(f, text="Arc (°)").grid(row=5, column=0, sticky="w", pady=2)
-        arcf = ttk.Frame(f)
-        arcf.grid(row=5, column=1, columnspan=3, sticky="w")
-        ttk.Entry(arcf, textvariable=self.v_arc, width=7).pack(side="left")
-        ttk.Label(arcf, text="  0 = straight; 90 arches up, -90 curves down",
-                  foreground="#666666").pack(side="left")
-        ttk.Checkbutton(f, text="Monogram: three letters, the middle one larger",
-                        variable=self.v_mono).grid(row=6, column=0, columnspan=4, sticky="w", pady=2)
-        ttk.Label(f, foreground="#666666", text="Tip: the Single-line fonts (top of the list) sew "
-                  "each letter as one clean line: best for small lettering.").grid(
-            row=7, column=0, columnspan=4, sticky="w")
-
-        self.cv = tk.Canvas(f, width=int(480 * ui), height=int(150 * ui), bg="white",
-                            highlightthickness=1, highlightbackground="#cccccc")
-        self.cv.grid(row=8, column=0, columnspan=4, pady=(8, 2))
-        self.info = ttk.Label(f, text="", foreground="#555555")
-        self.info.grid(row=9, column=0, columnspan=4, sticky="w")
-
-        b = ttk.Frame(f)
-        b.grid(row=10, column=0, columnspan=4, sticky="e", pady=(8, 0))
-        ttk.Button(b, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(b, text="OK", command=self._ok).pack(side="right", padx=6)
-
-        self.t_text.bind("<KeyRelease>", lambda e: self._schedule())
-        self.c_font.bind("<KeyRelease>", self._filter)
-        self.c_font.bind("<<ComboboxSelected>>", lambda e: self._schedule())
-        for v in (self.v_height, self.v_spacing, self.v_align, self.v_arc, self.v_mono):
-            v.trace_add("write", lambda *a: self._schedule())
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.bind("<Control-Return>", lambda e: self._ok())
-        _centre_on(self, parent)
-        self._preview()
-
-    def _filter(self, event):
-        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
-            return
-        typed = self.v_font.get().lower()
-        self.c_font.configure(values=[n for n in self.names if typed in n.lower()] or self.names)
-        self._schedule()
-
-    def _browse(self):
-        path = filedialog.askopenfilename(
-            parent=self, title="Choose a font file",
-            filetypes=[("Fonts", "*.ttf *.otf *.ttc *.otc"), ("All files", "*.*")])
-        if path:
-            name = os.path.splitext(os.path.basename(path))[0]
-            self.fonts[name] = (path, 0)
-            if name not in self.names:
-                self.names.append(name)
-            self.v_font.set(name)
-            self._schedule()
-
-    def _spec(self) -> TextSpec:
-        name = self.v_font.get().strip()
-        if name not in self.fonts:
-            raise ValueError("Choose a font from the list")
-        try:
-            height = float(self.v_height.get())
-            spacing = float(self.v_spacing.get() or 0)
-        except ValueError:
-            raise ValueError("Letter height and spacing must be numbers") from None
-        if height <= 0:
-            raise ValueError("Letter height must be more than 0")
-        path, idx = self.fonts[name]
-        try:
-            arc = float(self.v_arc.get() or 0)
-        except ValueError:
-            raise ValueError("Arc must be a number of degrees") from None
-        if not -300 <= arc <= 300:
-            raise ValueError("Arc must be between -300 and 300 degrees")
-        return TextSpec(self.t_text.get("1.0", "end-1c"), path, name, idx, height,
-                        self.v_align.get(), spacing, arc=arc, monogram=self.v_mono.get())
-
-    def _schedule(self):
-        if self._job is not None:
-            self.after_cancel(self._job)
-        self._job = self.after(150, self._preview)
-
-    def _preview(self):
-        self._job = None
-        cv = self.cv
-        cv.delete("all")
-        try:
-            spec = self._spec()
-            polys, missing = text_polylines(spec) if spec.text.strip() else ([], "")
-        except ValueError as e:
-            self.info.configure(text=str(e), foreground=ERROR_COLOUR)
-            return
-        if not polys:
-            self.info.configure(text="Type the text to add.", foreground="#555555")
-            return
-        pts = [p for pl in polys for p in pl.points]
-        x0, y0, x1, y1 = bounds(pts)
-        cw, ch = int(cv["width"]), int(cv["height"])
-        k = min((cw - 20) / max(x1 - x0, 1e-6), (ch - 20) / max(y1 - y0, 1e-6))
-        for pl in polys:
-            cv.create_line(*[c for x, y in pl.points
-                             for c in (cw / 2 + x * k, ch / 2 + y * k)], fill="#222222")
-        msg = f"{x1 - x0:.1f} × {y1 - y0:.1f} mm"
-        colour = "#555555"
-        if missing:
-            msg += f"   ·   not in this font: {missing}"
-            colour = WARN_COLOUR
-        self.info.configure(text=msg, foreground=colour)
-
-    def _ok(self):
-        try:
-            spec = self._spec()
-        except ValueError as e:
-            self.info.configure(text=str(e), foreground=ERROR_COLOUR)
-            return
-        if not spec.text.strip():
-            self.info.configure(text="Type the text to add.", foreground=ERROR_COLOUR)
-            return
-        self.result = spec
-        self.destroy()
-
-    def wait(self):
-        self.grab_set()
-        self.t_text.focus_set()
-        self.wait_window()
-        return self.result
-
-
-class FillDialog(tk.Toplevel):
-    """Modal dialog for an object's fill and outline stitches. After wait(),
-    .result is None (cancelled) or a dict with keys fill (FillSpec or None),
-    outline (bool) and satin (SatinSpec or None)."""
-
-    def __init__(self, parent, ui: float, title: str, spec: FillSpec | None, outline: bool,
-                 outline_rgb, satin: SatinSpec | None = None, can_fill_shape: bool = True):
-        super().__init__(parent)
-        self.title(title)
-        self.transient(parent)
-        self.resizable(False, False)
-        self.ui = ui
-        self.result = None
-        self.can_fill_shape = can_fill_shape
-        base = spec or FillSpec()
-        self.other_rgb = base.color or outline_rgb
-        # ticked if it already has a fill, or if it is a closed shape not yet given a satin border
-        self.v_on = tk.BooleanVar(value=spec is not None or (can_fill_shape and satin is None))
-        self.v_same = tk.BooleanVar(value=base.color is None)
-        self.v_angle = tk.StringVar(value=f"{base.angle:g}")
-        self.v_spacing = tk.StringVar(value=f"{base.spacing:g}")
-        self.v_len = tk.StringVar(value=f"{base.stitch_len:g}")
-        self.v_underlay = tk.BooleanVar(value=base.underlay)
-        self.v_pull = tk.StringVar(value=f"{base.pull_comp:g}")
-        self.v_outline = tk.BooleanVar(value=outline)
-        self.v_style = tk.StringVar(value="satin" if satin else "run")
-        self.v_width = tk.StringVar(value=f"{(satin or SatinSpec()).width:g}")
-        self._img = None
-        grey = dict(foreground="#666666")
-
-        f = ttk.Frame(self, padding=12)
-        f.pack(fill="both", expand=True)
-
-        # Fill ------------------------------------------------------------
-        ff = ttk.LabelFrame(f, text=" Fill ", padding=8)
-        ff.pack(fill="x")
-        chk = ttk.Checkbutton(ff, text="Fill the inside with stitches", variable=self.v_on,
-                              command=self._enable)
-        chk.grid(row=0, column=0, columnspan=3, sticky="w")
-        if not can_fill_shape:
-            self.v_on.set(False)
-            chk.configure(state="disabled")
-            ttk.Label(ff, text="(open shapes can't be filled)", **grey).grid(row=0, column=2, sticky="e")
-        self.widgets = []
-        ttk.Label(ff, text="Thread").grid(row=1, column=0, sticky="nw", pady=(8, 2))
-        tf = ttk.Frame(ff)
-        tf.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 2))
-        r1 = ttk.Radiobutton(tf, text="Same as the outline", variable=self.v_same, value=True)
-        r1.pack(anchor="w")
-        of = ttk.Frame(tf)
-        of.pack(anchor="w", pady=(2, 0))
-        r2 = ttk.Radiobutton(of, text="Another thread:", variable=self.v_same, value=False)
-        r2.pack(side="left")
-        self.l_thread = ttk.Label(of, compound="left", padding=(6, 0))
-        self.l_thread.pack(side="left")
-        b = ttk.Button(of, text="Choose…", command=self._pick)
-        b.pack(side="left", padx=6)
-        self.widgets += [r1, r2, b]
-        rows = (("Angle (°)", self.v_angle, "direction of the rows; turns with the object"),
-                ("Row spacing (mm)", self.v_spacing, "0.4 is typical; smaller is denser"),
-                ("Stitch length (mm)", self.v_len, "3–4 mm"),
-                ("Pull compensation (mm)", self.v_pull, "0.2 typical; more for stretchy fabric"))
-        for i, (label, var, hint) in enumerate(rows, start=2):
-            ttk.Label(ff, text=label).grid(row=i, column=0, sticky="w", pady=2)
-            e = ttk.Entry(ff, textvariable=var, width=7)
-            e.grid(row=i, column=1, sticky="w", pady=2)
-            ttk.Label(ff, text=hint, **grey).grid(row=i, column=2, sticky="w", padx=6)
-            self.widgets.append(e)
-        u = ttk.Checkbutton(ff, text="Underlay (light stitches first, so the fill lies flat)",
-                            variable=self.v_underlay)
-        u.grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        self.widgets.append(u)
-
-        # Outline ---------------------------------------------------------
-        fo = ttk.LabelFrame(f, text=" Outline ", padding=8)
-        fo.pack(fill="x", pady=(8, 0))
-        ttk.Checkbutton(fo, text="Sew the outline (on top of any fill)",
-                        variable=self.v_outline, command=self._enable).grid(
-            row=0, column=0, columnspan=3, sticky="w")
-        self.o_widgets = []
-        sf = ttk.Frame(fo)
-        sf.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        for val, text in (("run", "Run stitch (a thin line)"), ("satin", "Satin column, width")):
-            rb = ttk.Radiobutton(sf, text=text, value=val, variable=self.v_style)
-            rb.pack(side="left", padx=(0, 6))
-            self.o_widgets.append(rb)
-        e = ttk.Entry(sf, textvariable=self.v_width, width=5)
-        e.pack(side="left")
-        ttk.Label(sf, text=" mm  (1–5 mm suits borders)", **grey).pack(side="left")
-        self.o_widgets.append(e)
-
-        self.info = ttk.Label(f, text="", foreground=ERROR_COLOUR)
-        self.info.pack(anchor="w", pady=(6, 0))
-        bf = ttk.Frame(f)
-        bf.pack(anchor="e", pady=(8, 0))
-        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(bf, text="OK", command=self._ok).pack(side="right", padx=6)
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.bind("<Return>", lambda e: self._ok())
-        self._show_thread()
-        self._enable()
-        _centre_on(self, parent)
-
-    def _show_thread(self):
-        t = thread_for_rgb(self.other_rgb)
-        self._img = swatch(self, [to_hex(self.other_rgb)], int(16 * self.ui))
-        self.l_thread.configure(image=self._img,
-                                text=f" {t.number} {t.name}" if t else f" {to_hex(self.other_rgb)}")
-
-    def _pick(self):
-        p = ThreadPicker(self, self.ui, "Fill thread", thread_for_rgb(self.other_rgb), None, 0)
-        res = p.wait()
-        self.grab_set()                      # the picker took the grab; take it back
-        if isinstance(res, Thread):
-            self.other_rgb = res.rgb
-            self.v_same.set(False)
-            self._show_thread()
-
-    def _enable(self):
-        state = "normal" if self.v_on.get() else "disabled"
-        for w in self.widgets:
-            w.configure(state=state)
-        ostate = "normal" if self.v_outline.get() else "disabled"
-        for w in self.o_widgets:
-            w.configure(state=ostate)
-
-    def _num(self, var, label, lo, hi):
-        try:
-            v = float(var.get())
-        except ValueError:
-            raise ValueError(f"{label} must be a number.") from None
-        if not lo <= v <= hi:
-            raise ValueError(f"{label} must be between {lo:g} and {hi:g}.")
-        return v
-
-    def _ok(self):
-        try:
-            fill = None
-            if self.v_on.get():
-                fill = FillSpec(None if self.v_same.get() else self.other_rgb,
-                                self._num(self.v_angle, "Angle", -360, 360),
-                                self._num(self.v_spacing, "Row spacing", 0.2, 3),
-                                self._num(self.v_len, "Stitch length", 1, 12),
-                                self.v_underlay.get(),
-                                self._num(self.v_pull, "Pull compensation", 0, 1))
-            satin = None
-            if self.v_outline.get() and self.v_style.get() == "satin":
-                satin = SatinSpec(width=self._num(self.v_width, "Satin width", 0.5, 8))
-        except ValueError as e:
-            self.info.configure(text=str(e))
-            return
-        self.result = {"fill": fill, "outline": self.v_outline.get(), "satin": satin}
-        self.destroy()
-
-    def wait(self):
-        self.grab_set()
-        self.focus_set()
-        self.wait_window()
-        return self.result
-
-
-class ImageDialog(tk.Toplevel):
-    """Settings for turning a picture into stitches, with a live preview of the
-    colour reduction. After wait(), .result is None or (TraceSettings, fill: bool)."""
-
-    def __init__(self, parent, ui: float, path: str, width_mm: float):
-        super().__init__(parent)
-        self.title(f"Import picture: {os.path.basename(path)}")
-        self.transient(parent)
-        self.resizable(False, False)
-        self.ui, self.path = ui, path
-        self.result = None
-        self._job = None
-        self._photo = None
-        self.v_colours = tk.StringVar(value="4")
-        self.v_width = tk.StringVar(value=f"{width_mm:g}")
-        self.v_bg = tk.BooleanVar(value=True)
-        self.v_detail = tk.StringVar(value="Normal")
-        self.v_fill = tk.BooleanVar(value=True)
-        grey = dict(foreground="#666666")
-        f = ttk.Frame(self, padding=12)
-        f.pack(fill="both", expand=True)
-        size = int(360 * ui)
-        self.cv = tk.Canvas(f, width=size, height=size, bg="white", highlightthickness=1,
-                            highlightbackground="#cccccc")
-        self.cv.grid(row=0, column=0, rowspan=8, padx=(0, 12))
-        ttk.Label(f, text="Thread colours").grid(row=0, column=1, sticky="w")
-        ttk.Spinbox(f, from_=1, to=8, textvariable=self.v_colours, width=5,
-                    command=self._schedule).grid(row=0, column=2, sticky="w")
-        ttk.Label(f, text="Width (mm)").grid(row=1, column=1, sticky="w", pady=(6, 0))
-        ttk.Entry(f, textvariable=self.v_width, width=7).grid(row=1, column=2, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(f, text="Leave out the background colour", variable=self.v_bg,
-                        command=self._schedule).grid(row=2, column=1, columnspan=2, sticky="w", pady=(6, 0))
-        ttk.Label(f, text="Detail").grid(row=3, column=1, sticky="w", pady=(6, 0))
-        ttk.Combobox(f, textvariable=self.v_detail, values=("Fine", "Normal", "Coarse"),
-                     state="readonly", width=8).grid(row=3, column=2, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(f, text="Fill the areas (else outlines only)",
-                        variable=self.v_fill).grid(row=4, column=1, columnspan=2, sticky="w", pady=(6, 0))
-        ttk.Label(f, **grey, justify="left", wraplength=int(250 * ui), text=(
-            "Simple pictures with a few flat colours work best: logos, clip art, drawings. "
-            "Photos don't turn into good embroidery.")).grid(row=5, column=1, columnspan=2,
-                                                             sticky="w", pady=(10, 0))
-        self.info = ttk.Label(f, text="", foreground="#555555", wraplength=int(250 * ui))
-        self.info.grid(row=6, column=1, columnspan=2, sticky="nw", pady=(8, 0))
-        bf = ttk.Frame(f)
-        bf.grid(row=7, column=1, columnspan=2, sticky="se")
-        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(bf, text="Import", command=self._ok).pack(side="right", padx=6)
-        for v in (self.v_colours, self.v_detail):
-            v.trace_add("write", lambda *a: self._schedule())
-        self.bind("<Escape>", lambda e: self.destroy())
-        _centre_on(self, parent)
-        self._preview()
-
-    def _settings(self) -> TraceSettings:
-        try:
-            colours = int(self.v_colours.get())
-            width = float(self.v_width.get())
-        except ValueError:
-            raise ValueError("Colours and width must be numbers") from None
-        if not 1 <= colours <= 8:
-            raise ValueError("Choose 1 to 8 colours")
-        if width <= 0:
-            raise ValueError("Width must be more than 0")
-        return TraceSettings(colours, width, self.v_bg.get(), self.v_detail.get().lower())
-
-    def _schedule(self):
-        if self._job is not None:
-            self.after_cancel(self._job)
-        self._job = self.after(250, self._preview)
-
-    def _preview(self):
-        self._job = None
-        try:
-            s = self._settings()
-            img = image_preview(self.path, s)
-        except (ValueError, OSError) as e:
-            self.info.configure(text=str(e), foreground=ERROR_COLOUR)
-            return
-        size = int(self.cv["width"])
-        img.thumbnail((size - 8, size - 8), Image.NEAREST)
-        self._photo = ImageTk.PhotoImage(img, master=self)
-        self.cv.delete("all")
-        self.cv.create_image(size / 2, size / 2, image=self._photo)
-        names = []
-        colours = sorted({c for c in img.getdata() if c != (255, 255, 255)})
-        for c in colours[:8]:
-            t = nearest_brother(c)
-            names.append(f"{t.number} {t.name}")
-        self.info.configure(text="Threads: " + (", ".join(dict.fromkeys(names)) or "none"),
-                            foreground="#555555")
-
-    def _ok(self):
-        try:
-            s = self._settings()
-        except ValueError as e:
-            self.info.configure(text=str(e), foreground=ERROR_COLOUR)
-            return
-        self.result = (s, self.v_fill.get())
-        self.destroy()
-
-    def wait(self):
-        self.grab_set()
-        self.focus_set()
-        self.wait_window()
-        return self.result
-
-
 # ------------------------------------------------------------------ main window
 class App:
     def __init__(self, root: tk.Tk, path: str | None = None):
         self.root = root
         self.ui = max(1.0, root.winfo_fpixels("1i") / 96)
-        self.svg_path: str | None = None
-        self.svg_map: dict[str, DesignObject] = {}
-        self.text_objs: dict[str, DesignObject] = {}
-        self.extra_objs: dict[str, DesignObject] = {}  # copies, imported stitches and images
-        self.groups: dict[str, str] = {}             # obj_id -> group id
-        self.clipboard: list[dict] = []
-        self.project_path: str | None = None
+        self.doc = Document()                  # the design and its undo history
         self.log_path: str | None = None
         self._error_guard = RepeatGuard()
-        self.dirty = False                           # changes since the project was saved
-        self.texts: dict[str, TextSpec] = {}
-        self.order_ids: list[str] = []
-        self.mats: dict[str, Affine] = {}      # outline -> hoop placement, per object
-        self.home: dict[str, Affine] = {}      # placement when first opened / added
-        self.colours: dict[str, tuple[int, int, int]] = {}   # obj_id -> chosen thread rgb
-        self.skipped: set[str] = set()
-        self.fills: dict[str, FillSpec] = {}         # obj_id -> fill settings
-        self.no_outline: set[str] = set()            # objects whose outline is not sewn
-        self.satins: dict[str, SatinSpec] = {}       # obj_id -> satin outline settings
-        self.color_order: list = []                  # user's sewing order: [(phase, rgb), ...]
-        self.warnings: list[str] = []
         self.placed: dict[str, list[list[tuple[float, float]]]] = {}
         self.plan: Plan | None = None
         self.outside: list[str] = []
         self.outside_stitches_only: list[str] = []
-        self.hoop = (100.0, 100.0)
-        self.margin = 2.0
-        self.last_text: TextSpec | None = None
-        self.undo_stack: list = []
-        self.redo_stack: list = []
         self.px, self.origin = 1.0, (0.0, 0.0)
         self.handles: dict[str, tuple[float, float]] = {}
         self.drag = None
@@ -1120,18 +541,17 @@ class App:
         self.l_status.configure(foreground=colour)
 
     def obj(self, obj_id: str) -> DesignObject:
-        return (self.text_objs.get(obj_id) or self.extra_objs.get(obj_id)
-                or self.svg_map[obj_id])
+        return self.doc.obj(obj_id)
 
     def chosen_rgb(self, o: DesignObject):
-        return self.colours.get(o.obj_id) or nearest_brother(o.source_color).rgb
+        return self.doc.chosen_rgb(o)
 
     def selection(self) -> list[str]:
-        return [i for i in self.tree.selection() if i in self.mats]
+        return [i for i in self.tree.selection() if i in self.doc.mats]
 
     def target(self) -> list[str]:
         """What the Arrange controls act on: the selection, or everything."""
-        return self.selection() or list(self.order_ids)
+        return self.selection() or list(self.doc.order_ids)
 
     def target_bounds(self, ids=None):
         pts = [p for i in (ids if ids is not None else self.target())
@@ -1153,47 +573,39 @@ class App:
 
     def _edit_or_thread(self):
         sel = self.selection()
-        if len(sel) == 1 and sel[0] in self.texts:
+        if len(sel) == 1 and sel[0] in self.doc.texts:
             self.edit_text(sel[0])
         elif sel:
             self.change_thread()
 
     # ---------------------------------------------------------------- undo
-    def _state(self):
-        return (dict(self.mats), dict(self.home), dict(self.colours), set(self.skipped),
-                dict(self.texts), dict(self.text_objs), list(self.order_ids),
-                dict(self.fills), set(self.no_outline), dict(self.satins), list(self.color_order),
-                dict(self.extra_objs), dict(self.groups))
-
-    def _restore(self, st):
-        (self.mats, self.home, self.colours, self.skipped, self.texts, self.text_objs,
-         self.order_ids, self.fills, self.no_outline, self.satins, self.color_order,
-         self.extra_objs, self.groups) = st
-        self.fill_objects()
-        self.refresh()
-
-    def push_undo(self):
-        self.dirty = True
-        self.undo_stack.append(self._state())
-        del self.undo_stack[:-100]
-        self.redo_stack.clear()
-        self._undo_buttons()
 
     def undo(self):
-        if self.undo_stack:
-            self.redo_stack.append(self._state())
-            self._restore(self.undo_stack.pop())
-            self._undo_buttons()
+        if self.doc.undo():
+            self.sync()
 
     def redo(self):
-        if self.redo_stack:
-            self.undo_stack.append(self._state())
-            self._restore(self.redo_stack.pop())
-            self._undo_buttons()
+        if self.doc.redo():
+            self.sync()
 
     def _undo_buttons(self):
-        self.b_undo.configure(state="normal" if self.undo_stack else "disabled")
-        self.b_redo.configure(state="normal" if self.redo_stack else "disabled")
+        self.b_undo.configure(state="normal" if self.doc.undo_stack else "disabled")
+        self.b_redo.configure(state="normal" if self.doc.redo_stack else "disabled")
+
+    def sync(self, select=None):
+        """After the document changes: refill the list, set the selection (if given),
+        re-plan, redraw and update Undo / Redo."""
+        self.fill_objects()
+        if select is not None:
+            if select:
+                self.tree.selection_set(select)
+            else:
+                self.tree.selection_remove(self.tree.selection())
+        self.refresh()
+        self._undo_buttons()
+
+    def _doc_error(self, e: DocError):
+        self.set_status(str(e), WARN_COLOUR)
 
     # ---------------------------------------------------------------- files
     OPEN_TYPES = [("Designs", "*.svg *.svg2pes *.pes *.dst *.jef *.exp *.vp3 *.png *.jpg *.jpeg *.bmp *.gif"),
@@ -1238,29 +650,6 @@ class App:
         self._fix_dpi(design)
         self._start_design(design, path)
 
-    def _clear_design(self):
-        for d in (self.svg_map, self.text_objs, self.extra_objs, self.groups, self.texts,
-                  self.colours, self.fills, self.satins, self.mats, self.home):
-            d.clear()
-        for st in (self.no_outline, self.skipped):
-            st.clear()
-        self.color_order.clear()
-        self.order_ids = []
-        self.warnings = []
-        self.undo_stack.clear()
-        self.redo_stack.clear()
-        self._undo_buttons()
-        self.project_path = None
-        self.dirty = False
-
-    def _fit_matrix(self, objects):
-        """Placement that centres objects in the hoop, shrunk to fit if too big."""
-        x0, y0, x1, y1 = bounds([p for o in objects for pl in o.polylines for p in pl.points])
-        aw, ah = self.hoop[0] - 2 * self.margin, self.hoop[1] - 2 * self.margin
-        limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 0]
-        s = min([1.0] + limits)
-        return chain(translate(-(x0 + x1) / 2, -(y0 + y1) / 2), scale(s)), s
-
     def _fix_dpi(self, design) -> None:
         """Offer to scale an Illustrator (72 dpi) export up to its intended size."""
         if not getattr(design, "dpi_hint", None):
@@ -1270,33 +659,17 @@ class App:
                                "Illustrator measures at 72 dpi, so the design would come out "
                                "25% smaller than drawn.\n\nScale it up to 133% (its intended "
                                "size)?", parent=self.root):
-            k = 96.0 / design.dpi_hint
-            for o in design.objects:
-                o.polylines = [Polyline([(x * k, y * k) for x, y in pl.points], pl.closed)
-                               for pl in o.polylines]
+            Document.scale_objects(design, 96.0 / design.dpi_hint)
 
     def _start_design(self, design, path: str):
         try:
             self._read_hoop()
         except ValueError:
             pass            # keep the last good hoop size
-        self._clear_design()
-        self.svg_path = path
-        for o in design.objects:
-            (self.text_objs if o.obj_id in design.texts else self.svg_map)[o.obj_id] = o
-        self.texts.update(design.texts)
-        self.order_ids = [o.obj_id for o in design.objects]
-        self.warnings = list(design.warnings)
-        if any(o.stitches for o in design.objects):
-            m, s = IDENTITY, 1.0          # embroidery files are already placed on the hoop
-        else:
-            m, s = self._fit_matrix(design.objects)
-        self.mats = {i: m for i in self.order_ids}
-        self.home = dict(self.mats)
+        s = self.doc.load_design(design, path)
         self._set_title(os.path.basename(path))
-        log.info("Opened %s (%d objects)", path, len(self.order_ids))
-        self.fill_objects()
-        self.refresh()
+        log.info("Opened %s (%d objects)", path, len(self.doc.order_ids))
+        self.sync()
         if s < 1:
             self.set_status(f"The design was shrunk to {s:.0%} to fit the hoop. Use Arrange to "
                             "change its size.", WARN_COLOUR)
@@ -1308,11 +681,9 @@ class App:
     def new_design(self, confirm: bool = True):
         if confirm and not self._confirm_discard():
             return
-        self._clear_design()
-        self.svg_path = None
+        self.doc.clear()
         self._set_title("New design")
-        self.fill_objects()
-        self.refresh()
+        self.sync()
         self.set_status("New design: open or import artwork, or add text.")
 
     def ask_import(self):
@@ -1339,59 +710,33 @@ class App:
         self._fix_dpi(design)
         self.add_objects(design.objects, keep_place=any(o.stitches for o in design.objects),
                          texts=design.texts)
-        if self.svg_path is None:
-            self.svg_path = path
+        self.doc.note_source(path)
 
     def add_objects(self, objects, keep_place: bool = False, fills=None, texts=None):
-        """Add new objects to the design (renamed if their ids are taken), centred in the
-        hoop (or left where they are), and select them."""
-        self.push_undo()
-        index = max([self.obj(i).index for i in self.order_ids], default=0)
-        m = IDENTITY if keep_place else self._fit_matrix(objects)[0]
-        new_ids = []
-        for o in objects:
-            nid, n = o.obj_id, 2
-            while nid in self.mats or nid in self.svg_map or nid in self.text_objs:
-                nid = f"{o.obj_id}_{n}"
-                n += 1
-            index += 1
-            if texts and o.obj_id in texts:
-                self.text_objs[nid] = replace(o, index=index, obj_id=nid)
-                self.texts[nid] = texts[o.obj_id]
-            else:
-                self.extra_objs[nid] = replace(o, index=index, obj_id=nid)
-            self.order_ids.append(nid)
-            self.mats[nid] = self.home[nid] = m
-            if fills and o.obj_id in fills:
-                self.fills[nid] = fills[o.obj_id]
-            new_ids.append(nid)
-        self.fill_objects()
-        self.tree.selection_set(new_ids)
-        self.refresh()
+        """Add objects to the design and select them."""
+        new_ids = self.doc.add_objects(objects, keep_place, fills, texts)
+        self.sync(select=new_ids)
         log.info("Added %d object(s)", len(new_ids))
         self.set_status(f"Added {len(new_ids)} object(s). They are selected: drag them into place.")
         return new_ids
 
     # ---------------------------------------------------------------- projects
-    def _project(self) -> Project:
-        objs = [self.obj(i) for i in self.order_ids]
-        settings = {"hoop": [self.v_hoop_w.get(), self.v_hoop_h.get()],
-                    "margin": self.v_margin.get(), "stitch_len": self.v_stitch.get(),
-                    "keep_order": self.v_keep.get(), "knockout": self.v_knockout.get(),
-                    "machine_spm": self.v_spm.get(), "pes_version": self.v_pes.get()}
-        return Project(objs, dict(self.mats), dict(self.home), dict(self.colours),
-                       set(self.skipped), dict(self.fills), set(self.no_outline),
-                       dict(self.satins), dict(self.texts), dict(self.groups),
-                       list(self.color_order), settings, self.svg_path, list(self.warnings))
+    def _settings_dict(self) -> dict:
+        """The Stitching-tab settings, as saved in a project."""
+        return {"hoop": [self.v_hoop_w.get(), self.v_hoop_h.get()],
+                "margin": self.v_margin.get(), "stitch_len": self.v_stitch.get(),
+                "keep_order": self.v_keep.get(), "knockout": self.v_knockout.get(),
+                "machine_spm": self.v_spm.get(), "pes_version": self.v_pes.get()}
 
     def save_project(self, save_as: bool = False) -> bool:
-        if not self.order_ids:
+        doc = self.doc
+        if not doc.order_ids:
             self.set_status("Nothing to save yet.", WARN_COLOUR)
             return False
-        path = self.project_path
+        path = doc.project_path
         if save_as or not path:
-            base = os.path.splitext(os.path.basename(self.svg_path or "design"))[0]
-            folder = os.path.dirname(self.svg_path) if self.svg_path else os.path.expanduser("~")
+            base = os.path.splitext(os.path.basename(doc.svg_path or "design"))[0]
+            folder = os.path.dirname(doc.svg_path) if doc.svg_path else os.path.expanduser("~")
             path = filedialog.asksaveasfilename(
                 parent=self.root, title="Save project", defaultextension=PROJECT_EXTENSION,
                 initialfile=base + PROJECT_EXTENSION, initialdir=folder,
@@ -1399,14 +744,13 @@ class App:
             if not path:
                 return False
         try:
-            save_project(path, self._project())
+            save_project(path, doc.to_project(self._settings_dict()))
         except OSError as e:
             messagebox.showerror(TITLE, f"Could not save {path}:\n\n{e}", parent=self.root)
             return False
-        self.project_path = path
-        self.dirty = False
+        doc.mark_saved(path)
         self._set_title(os.path.basename(path))
-        log.info("Saved project %s (%d objects)", path, len(self.order_ids))
+        log.info("Saved project %s (%d objects)", path, len(doc.order_ids))
         self.set_status(f"Saved project {path}. Open it again with File → Open.", OK_COLOUR)
         return True
 
@@ -1416,8 +760,7 @@ class App:
         except (OSError, ValueError, TypeError, KeyError) as e:
             messagebox.showerror(TITLE, f"Could not open {path}:\n\n{e}", parent=self.root)
             return
-        self._clear_design()
-        st = proj.settings
+        st = self.doc.load_project(proj, path)
         if "hoop" in st:
             self.v_hoop_w.set(str(st["hoop"][0]))
             self.v_hoop_h.set(str(st["hoop"][1]))
@@ -1432,26 +775,14 @@ class App:
             self._read_hoop()
         except ValueError:
             pass
-        for o in proj.objects:
-            (self.text_objs if o.obj_id in proj.texts else self.svg_map)[o.obj_id] = o
-        self.order_ids = [o.obj_id for o in proj.objects]
-        self.mats = {i: proj.mats.get(i, IDENTITY) for i in self.order_ids}
-        self.home = {i: proj.home.get(i, self.mats[i]) for i in self.order_ids}
-        self.colours, self.fills, self.satins = proj.colours, proj.fills, proj.satins
-        self.texts, self.groups = proj.texts, proj.groups
-        self.skipped, self.no_outline = proj.skipped, proj.no_outline
-        self.color_order, self.warnings = proj.color_order, proj.warnings
-        self.svg_path = proj.source or path
-        self.project_path = path
         self._set_title(os.path.basename(path))
-        log.info("Opened project %s (%d objects)", path, len(self.order_ids))
-        self.fill_objects()
-        self.refresh()
-        self.dirty = False
+        log.info("Opened project %s (%d objects)", path, len(self.doc.order_ids))
+        self.sync()
+        self.doc.mark_saved()           # setting the variables above isn't a change
 
     def _confirm_discard(self) -> bool:
         """True if it's fine to throw away the current design (asks to save changes)."""
-        if not self.dirty or not self.order_ids:
+        if not self.doc.dirty or not self.doc.order_ids:
             return True
         ans = messagebox.askyesnocancel(TITLE, "Save the changes to this design as a project "
                                         "first?", parent=self.root)
@@ -1468,7 +799,7 @@ class App:
 
     def import_image(self, path: str):
         """Trace a picture into filled shapes and add them to the design."""
-        width = min(80.0, self.hoop[0] - 2 * self.margin)
+        width = min(80.0, self.doc.hoop[0] - 2 * self.doc.margin)
         try:
             res = ImageDialog(self.root, self.ui, path, width).wait()
         except OSError as e:
@@ -1485,15 +816,10 @@ class App:
         if not objects:
             self.set_status("; ".join(warnings) or "Nothing to stitch in that picture.", WARN_COLOUR)
             return
-        fills = {o.obj_id: FillSpec() for o in objects} if fill else None
-        new_ids = self.add_objects(objects, fills=fills)
-        if fill:
-            self.no_outline.update(new_ids)
-            self.fill_objects()
-            self.tree.selection_set(new_ids)
-            self.refresh()
-        if self.svg_path is None:
-            self.svg_path = path
+        new_ids = self.doc.add_traced(objects, fill)
+        self.sync(select=new_ids)
+        if self.doc.svg_path is None:
+            self.doc.note_source(path)
             self._set_title(os.path.basename(path))
         self.set_status(f"Picture traced into {len(new_ids)} colour(s). Check the shapes, "
                         "then adjust threads or fills as needed.", OK_COLOUR)
@@ -1512,8 +838,8 @@ class App:
                                        "Move or shrink it first (Arrange → Fit to hoop).",
                                        parent=self.root)
             return
-        if self.svg_path:
-            stem, folder = os.path.splitext(os.path.basename(self.svg_path))[0], os.path.dirname(self.svg_path)
+        if self.doc.svg_path:
+            stem, folder = os.path.splitext(os.path.basename(self.doc.svg_path))[0], os.path.dirname(self.doc.svg_path)
         else:
             stem, folder = "text", os.path.expanduser("~")
         short = re.sub(r"[^A-Za-z0-9]", "", stem)[:8] or "design"
@@ -1540,29 +866,29 @@ class App:
         self.tree.delete(*self.tree.get_children())
         self._images.clear()
         size = int(16 * self.ui)
-        for oid in self.order_ids:
+        for oid in self.doc.order_ids:
             o = self.obj(oid)
             rgb = self.chosen_rgb(o)
             t = thread_for_rgb(rgb)
             img = swatch(self.root, [to_hex(o.source_color), to_hex(rgb)], size)
             self._images.append(img)
-            skipped = oid in self.skipped
-            outline = "(no outline)" if oid in self.no_outline else \
+            skipped = oid in self.doc.skipped
+            outline = "(no outline)" if oid in self.doc.no_outline else \
                 (f"{t.number}  {t.name}" if t else to_hex(rgb))
-            if oid in self.satins and oid not in self.no_outline:
-                outline += f"  (satin {self.satins[oid].width:g})"
+            if oid in self.doc.satins and oid not in self.doc.no_outline:
+                outline += f"  (satin {self.doc.satins[oid].width:g})"
             fill = "—"
-            if oid in self.fills:
-                frgb = self.fills[oid].color or rgb
+            if oid in self.doc.fills:
+                frgb = self.doc.fills[oid].color or rgb
                 ft = thread_for_rgb(frgb)
                 fill = f"{ft.number}  {ft.name}" if ft else to_hex(frgb)
-            if oid in self.texts:
-                first = self.texts[oid].text.strip().split("\n")[0]
+            if oid in self.doc.texts:
+                first = self.doc.texts[oid].text.strip().split("\n")[0]
                 kind = f"Text “{first[:16]}{'…' if len(first) > 16 else ''}”"
             else:
                 kind = o.kind
-            if oid in self.groups:
-                kind += f"  [{self.groups[oid]}]"
+            if oid in self.doc.groups:
+                kind += f"  [{self.doc.groups[oid]}]"
             self.tree.insert("", "end", iid=oid, text=f" {o.index}", image=img,
                              values=(oid, kind, outline, fill, "skip" if skipped else "sew"),
                              tags=("skipped",) if skipped else ())
@@ -1578,9 +904,9 @@ class App:
         return sel
 
     def select_all(self):
-        if self.order_ids:
-            self.tree.selection_set(self.order_ids)
-            self.set_status(f"Selected all {len(self.order_ids)} objects.")
+        if self.doc.order_ids:
+            self.tree.selection_set(self.doc.order_ids)
+            self.set_status(f"Selected all {len(self.doc.order_ids)} objects.")
 
     def select_none(self):
         if self.drag and self.drag["mode"] == "box":     # Esc during a box drag cancels it
@@ -1592,316 +918,140 @@ class App:
         sel = self._need_selection()
         if not sel:
             return
-        objs = [self.obj(i) for i in sel]
-        first = objs[0]
-        others = []
-        if len(objs) == 1:
-            others = [self.obj(i) for i in self.order_ids
-                      if self.obj(i).source_color == first.source_color and i != first.obj_id]
-        title = (f"Thread for {first.obj_id}" if len(objs) == 1
-                 else f"Thread for {len(objs)} objects")
+        first = self.obj(sel[0])
+        others = self.doc.same_source_colour(first.obj_id) if len(sel) == 1 else []
+        title = (f"Thread for {first.obj_id}" if len(sel) == 1
+                 else f"Thread for {len(sel)} objects")
         picker = ThreadPicker(self.root, self.ui, title, thread_for_rgb(self.chosen_rgb(first)),
                               to_hex(first.source_color), len(others))
         result = picker.wait()
         if result is None:
             return
-        self.push_undo()
-        for o in objs + (others if picker.apply_all.get() else []):
-            if result == "reset":
-                self.colours.pop(o.obj_id, None)
-            else:
-                self.colours[o.obj_id] = result.rgb
-        self.fill_objects()
-        self.refresh()
+        ids = sel + (others if picker.apply_all.get() else [])
+        self.doc.set_thread(ids, None if result == "reset" else result.rgb)
+        self.sync()
 
     def toggle_skip(self):
         sel = self._need_selection()
-        if not sel:
-            return
-        self.push_undo()
-        skip = any(i not in self.skipped for i in sel)
-        for i in sel:
-            (self.skipped.add if skip else self.skipped.discard)(i)
-        self.fill_objects()
-        self.refresh()
-
-    def _forget(self, i: str):
-        for d in (self.texts, self.text_objs, self.extra_objs, self.mats, self.home,
-                  self.colours, self.fills, self.satins, self.groups):
-            d.pop(i, None)
-        self.skipped.discard(i)
-        self.no_outline.discard(i)
-        if i in self.order_ids:
-            self.order_ids.remove(i)
+        if sel:
+            self.doc.toggle_skip(sel)
+            self.sync()
 
     def delete_selected(self):
         sel = self._need_selection()
         if not sel:
             return
-        self.push_undo()
-        for i in sel:
-            self._forget(i)
-        self.fill_objects()
-        self.refresh()
+        self.doc.delete(sel)
+        self.sync()
         self.set_status(f"Deleted {len(sel)} object(s). Undo (Ctrl+Z) brings them back.")
 
     # ---------------------------------------------------------------- copy / paste
-    def _snapshot(self, i: str) -> dict:
-        return {"obj": self.obj(i), "mat": self.mats[i], "colour": self.colours.get(i),
-                "skipped": i in self.skipped, "fill": self.fills.get(i),
-                "no_outline": i in self.no_outline, "satin": self.satins.get(i),
-                "text": self.texts.get(i), "group": self.groups.get(i)}
-
-    def _new_id(self, base: str) -> str:
-        base = base.split("_copy")[0]
-        n = 1
-        while f"{base}_copy{n}" in self.mats or f"{base}_copy{n}" in self.svg_map:
-            n += 1
-        return f"{base}_copy{n}"
 
     def copy_selection(self):
         sel = self._need_selection()
         if sel:
-            self.clipboard = [self._snapshot(i) for i in sel]
+            self.doc.copy(sel)
             self.set_status(f"Copied {len(sel)} object(s). Paste with Ctrl+V.")
 
-    def paste(self, offset: float = 5.0):
-        if not self.clipboard:
-            self.set_status("Nothing to paste: copy objects first (Ctrl+C).", WARN_COLOUR)
-            return
-        self.push_undo()
-        index = max([self.obj(i).index for i in self.order_ids], default=0)
-        new_groups: dict[str, str] = {}
-        new_ids = []
-        for snap in self.clipboard:
-            o = snap["obj"]
-            nid = self._new_id(o.obj_id)
-            index += 1
-            copy = replace(o, index=index, obj_id=nid)
-            if snap["text"] is not None:
-                self.text_objs[nid] = copy
-                self.texts[nid] = snap["text"]
-            else:
-                self.extra_objs[nid] = copy
-            self.order_ids.append(nid)
-            self.mats[nid] = chain(snap["mat"], translate(offset, offset))
-            self.home[nid] = self.mats[nid]
-            for key, store in (("colour", self.colours), ("fill", self.fills),
-                               ("satin", self.satins)):
-                if snap[key] is not None:
-                    store[nid] = snap[key]
-            if snap["skipped"]:
-                self.skipped.add(nid)
-            if snap["no_outline"]:
-                self.no_outline.add(nid)
-            if snap["group"]:
-                if snap["group"] not in new_groups:          # copies form a group of their own
-                    new_groups[snap["group"]] = self._new_group_id()
-                self.groups[nid] = new_groups[snap["group"]]
-            new_ids.append(nid)
-        self.fill_objects()
-        self.tree.selection_set(new_ids)
-        self.refresh()
+    def paste(self):
+        try:
+            new_ids = self.doc.paste()
+        except DocError as e:
+            return self._doc_error(e)
+        self.sync(select=new_ids)
         self.set_status(f"Pasted {len(new_ids)} object(s), 5 mm down and right. Drag them into place.")
 
     def duplicate(self):
         sel = self._need_selection()
         if sel:
-            saved = self.clipboard
-            self.clipboard = [self._snapshot(i) for i in sel]
-            self.paste()
-            self.clipboard = saved
+            new_ids = self.doc.duplicate(sel)
+            self.sync(select=new_ids)
+            self.set_status(f"Duplicated {len(new_ids)} object(s), 5 mm down and right.")
 
     # ---------------------------------------------------------------- groups
-    def _new_group_id(self) -> str:
-        n = 1
-        while f"group {n}" in self.groups.values():
-            n += 1
-        return f"group {n}"
 
     def expand_groups(self, ids) -> list[str]:
-        """ids plus every other member of their groups."""
-        gids = {self.groups[i] for i in ids if i in self.groups}
-        extra = [i for i in self.order_ids if self.groups.get(i) in gids and i not in ids]
-        return list(ids) + extra
+        return self.doc.expand_groups(ids)
 
     def group_selection(self):
         sel = self._need_selection()
-        if len(sel) < 2:
-            if sel:
-                self.set_status("Select two or more objects to group them.", WARN_COLOUR)
+        if not sel:
             return
-        self.push_undo()
-        gid = self._new_group_id()
-        for i in sel:
-            self.groups[i] = gid
-        self.fill_objects()
+        try:
+            gid = self.doc.group(sel)
+        except DocError as e:
+            return self._doc_error(e)
+        self.sync()
         self.set_status(f"Grouped {len(sel)} objects as {gid}: clicking one selects them all.")
 
     def ungroup_selection(self):
-        sel = [i for i in self._need_selection() if i in self.groups]
-        if not sel:
-            return
-        self.push_undo()
-        for i in sel:
-            del self.groups[i]
-        self.fill_objects()
-        self.set_status(f"Ungrouped {len(sel)} object(s).")
+        n = self.doc.ungroup(self._need_selection())
+        if n:
+            self.sync()
+            self.set_status(f"Ungrouped {n} object(s).")
 
     # ---------------------------------------------------------------- flip / align
     def flip(self, horizontal: bool):
-        b = self.target_bounds()
-        if b:
-            cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
-            self.apply_transform(scale(-1, 1, cx, cy) if horizontal else scale(1, -1, cx, cy))
+        self._arrange(self.doc.flip, self.target(), horizontal)
 
-    def _units(self, ids) -> list[list[str]]:
-        """Objects to move together: each group is one unit, other objects on their own."""
-        units, seen = [], {}
-        for i in ids:
-            g = self.groups.get(i)
-            if g is None:
-                units.append([i])
-            elif g in seen:
-                seen[g].append(i)
-            else:
-                seen[g] = [i]
-                units.append(seen[g])
-        return units
+    def _arrange(self, op, ids, *args, **kw):
+        """Run a document arranging operation, then redraw (or say why it couldn't)."""
+        if not ids:
+            return
+        try:
+            op(ids, *args, **kw)
+        except DocError as e:
+            return self._doc_error(e)
+        self.sync()
 
     def align(self, how: str):
         sel = self._need_selection()
-        if not sel:
-            return
-        units = self._units(sel)
-        if len(units) == 1:          # one object (or group): align it to the sewing area
-            hw, hh = self.hoop[0] / 2 - self.margin, self.hoop[1] / 2 - self.margin
-            ref = (-hw, -hh, hw, hh)
-        else:
-            ref = self.target_bounds(sel)
-        self.push_undo()
-        for u in units:
-            b = self.target_bounds(u)
-            dx = {"left": ref[0] - b[0], "right": ref[2] - b[2],
-                  "hcentre": (ref[0] + ref[2]) / 2 - (b[0] + b[2]) / 2}.get(how, 0.0)
-            dy = {"top": ref[1] - b[1], "bottom": ref[3] - b[3],
-                  "vcentre": (ref[1] + ref[3]) / 2 - (b[1] + b[3]) / 2}.get(how, 0.0)
-            for i in u:
-                self.mats[i] = chain(self.mats[i], translate(dx, dy))
-        self.refresh()
+        self._arrange(self.doc.align, sel, how)
 
     def distribute(self, horizontal: bool):
         sel = self._need_selection()
-        units = self._units(sel)
-        if len(units) < 3:
-            if sel:
-                self.set_status("Select three or more objects (or groups) to space them evenly.",
-                                WARN_COLOUR)
-            return
-        k = 0 if horizontal else 1
-        boxes = sorted(((self.target_bounds(u), u) for u in units), key=lambda bu: bu[0][k])
-        first, last = boxes[0][0], boxes[-1][0]
-        total = sum(b[k + 2] - b[k] for b, _ in boxes)
-        gap = ((last[k + 2] - first[k]) - total) / (len(boxes) - 1)
-        self.push_undo()
-        pos = first[k]
-        for b, u in boxes:
-            shift = pos - b[k]
-            for i in u:
-                self.mats[i] = chain(self.mats[i], translate(shift, 0) if horizontal else translate(0, shift))
-            pos += (b[k + 2] - b[k]) + gap
-        self.refresh()
+        self._arrange(self.doc.distribute, sel, horizontal)
 
     def reset_all(self):
-        if not self.order_ids:
-            return
-        self.push_undo()
-        self.colours.clear()
-        self.skipped.clear()
-        self.fills.clear()
-        self.no_outline.clear()
-        self.satins.clear()
-        self.color_order.clear()
-        self.mats = dict(self.home)
-        self.fill_objects()
-        self.refresh()
+        if self.doc.order_ids:
+            self.doc.reset_all()
+            self.sync()
 
     # ---------------------------------------------------------------- fill
-    def _placed_fill(self, oid: str):
-        """The object's fill with its row angle turned by the object's own rotation,
-        so the rows keep their direction relative to the shape."""
-        spec = self.fills.get(oid)
-        if spec is None:
-            return None
-        a, b, c, d, _, _ = self.mats[oid]
-        turn = math.degrees(math.atan2(b, a))
-        angle = spec.angle + turn if a * d - b * c >= 0 else turn - spec.angle   # mirrored
-        return replace(spec, angle=angle)
 
     def edit_fill(self):
         sel = self._need_selection()
         if not sel:
             return
-        sel = [i for i in sel if not self.obj(i).stitches]      # imported stitches: as they are
-        if not sel:
-            self.set_status("Imported stitches are sewn as they are; only their thread can change.",
-                            WARN_COLOUR)
-            return
-        ok = [i for i in sel if can_fill(self.obj(i).polylines)]
-        first = (ok or sel)[0]
-        title = f"Fill and outline: {first}" if len(sel) == 1 else \
-            f"Fill and outline: {len(sel)} objects"
-        res = FillDialog(self.root, self.ui, title, self.fills.get(first),
-                         first not in self.no_outline, self.chosen_rgb(self.obj(first)),
-                         self.satins.get(first), can_fill_shape=bool(ok)).wait()
+        try:
+            ids, fillable = self.doc.stitch_targets(sel)
+        except DocError as e:
+            return self._doc_error(e)
+        first = (fillable or ids)[0]
+        title = f"Fill and outline: {first}" if len(ids) == 1 else \
+            f"Fill and outline: {len(ids)} objects"
+        res = FillDialog(self.root, self.ui, title, self.doc.fills.get(first),
+                         first not in self.doc.no_outline, self.chosen_rgb(self.obj(first)),
+                         self.doc.satins.get(first), can_fill_shape=bool(fillable)).wait()
         if res is None:
             return
-        self.push_undo()
-        for i in sel:
-            if i in ok:
-                if res["fill"] is None:
-                    self.fills.pop(i, None)
-                else:
-                    self.fills[i] = res["fill"]
-            (self.no_outline.discard if res["outline"] else self.no_outline.add)(i)
-            if res["satin"] is None:
-                self.satins.pop(i, None)
-            else:
-                self.satins[i] = res["satin"]
-        self.fill_objects()
-        self.refresh()
-        left_out = [i for i in sel if i not in ok]
-        if left_out and res["fill"] is not None:
+        left_out = self.doc.set_stitches(ids, res["fill"], res["outline"], res["satin"])
+        self.sync()
+        if left_out:
             self.set_status(f"Not closed shapes, so not filled: {', '.join(left_out)}", WARN_COLOUR)
 
     # ---------------------------------------------------------------- text
     def add_text(self):
-        spec = TextDialog(self.root, self.ui, self.last_text and
-                          TextSpec("", self.last_text.font_path, self.last_text.font_name,
-                                   self.last_text.font_index, self.last_text.height_mm,
-                                   self.last_text.align, self.last_text.spacing_mm),
-                          editing=False).wait()
+        last = self.doc.last_text
+        spec = TextDialog(self.root, self.ui, last and replace(last, text=""), editing=False).wait()
         if spec is None:
             return
-        polys, missing = text_polylines(spec)
-        if not polys:
-            self.set_status("That text has no letters this font can draw.", ERROR_COLOUR)
-            return
-        self.push_undo()
-        n = 1
-        while f"text{n}" in self.mats or f"text{n}" in self.svg_map:
-            n += 1
-        oid = f"text{n}"
-        index = max([self.obj(i).index for i in self.order_ids], default=0) + 1
-        self.text_objs[oid] = DesignObject(index, oid, "Text", (0, 0, 0), polys, color=(0, 0, 0))
-        self.texts[oid] = spec
-        self.order_ids.append(oid)
-        self.mats[oid] = self.home[oid] = IDENTITY       # centred in the hoop
-        self.last_text = spec
-        self.fill_objects()
-        self.tree.selection_set([oid])
+        try:
+            oid, missing = self.doc.add_text(spec)
+        except DocError as e:
+            return self.set_status(str(e), ERROR_COLOUR)
+        self.sync(select=[oid])
         self.tree.see(oid)
-        self.refresh()
         if missing:
             self.set_status(f"Not in this font, left out: {missing}", WARN_COLOUR)
         elif not self.outside:
@@ -1909,41 +1059,25 @@ class App:
                             "Double-click it to edit.", OK_COLOUR)
 
     def edit_text(self, oid: str):
-        old = self.texts[oid]
+        old = self.doc.texts[oid]
         spec = TextDialog(self.root, self.ui, old, editing=True).wait()
         if spec is None or spec == old:
             return
-        polys, missing = text_polylines(spec)
-        if not polys:
-            self.set_status("That text has no letters this font can draw.", ERROR_COLOUR)
-            return
-        self.push_undo()
-        o = self.text_objs[oid]
-        old = [q for pl in o.polylines for q in pl.points]
-        if old:
-            ob = bounds(old)
-            cx, cy = (ob[0] + ob[2]) / 2, (ob[1] + ob[3]) / 2
-            polys = [Polyline([(x + cx, y + cy) for x, y in pl.points], pl.closed) for pl in polys]
-        self.text_objs[oid] = DesignObject(o.index, oid, "Text", o.source_color, polys,
-                                           color=o.source_color)
-        self.texts[oid] = spec
-        self.last_text = spec
-        self.fill_objects()
-        self.refresh()
+        try:
+            missing = self.doc.edit_text(oid, spec)
+        except DocError as e:
+            return self.set_status(str(e), ERROR_COLOUR)
+        self.sync()
         if missing:
             self.set_status(f"Not in this font, left out: {missing}", WARN_COLOUR)
 
     # ---------------------------------------------------------------- arranging
     def apply_transform(self, m: Affine, ids=None):
+        """Apply a placement change from a drag or a nudge (hoop coordinates)."""
         ids = list(ids if ids is not None else self.target())
-        if not ids:
-            return
-        self.push_undo()
-        for i in ids:
-            self.mats[i] = chain(self.mats[i], m)
-        self.refresh()
-
-    # lengths are kept in mm; the Arrange fields and readouts show the chosen units
+        if ids:
+            self.doc.transform(ids, m)
+            self.sync()
     def _fmt(self, v: float) -> str:
         return f"{v / 25.4:.2f}" if self.v_units.get() == "in" else f"{v:.1f}"
 
@@ -1963,7 +1097,7 @@ class App:
 
     def update_arrange_fields(self):
         sel = self.selection()
-        if not self.order_ids:
+        if not self.doc.order_ids:
             self.l_target.configure(text="Nothing to arrange yet")
         elif sel:
             self.l_target.configure(text=f"Selected: {', '.join(sel[:4])}"
@@ -1988,42 +1122,31 @@ class App:
             return None
 
     def apply_size(self):
-        b = self.target_bounds()
-        if not b or (self.v_w.get() == self._shown.get("w") and self.v_h.get() == self._shown.get("h")):
+        if not self.target() or (self.v_w.get() == self._shown.get("w")
+                                 and self.v_h.get() == self._shown.get("h")):
             return
         w, h = self._len(self.v_w, "Width"), self._len(self.v_h, "Height")
         if w is None or h is None:
             return
-        if w <= 0 or h <= 0:
-            self.set_status("Size must be more than 0.", ERROR_COLOUR)
+        try:
+            self.doc.resize(self.target(), w, h, self.v_ratio.get(),
+                            width_changed=self.v_w.get() != self._shown.get("w"))
+        except DocError as e:
+            self.set_status(str(e), ERROR_COLOUR)
             self.update_arrange_fields()
             return
-        x0, y0, x1, y1 = b
-        cw, ch = x1 - x0, y1 - y0
-        sx = w / cw if cw > 1e-6 else 1.0
-        sy = h / ch if ch > 1e-6 else 1.0
-        if self.v_ratio.get():
-            if self.v_w.get() != self._shown.get("w") or ch <= 1e-6:
-                sy = sx
-            else:
-                sx = sy
-        self.apply_transform(scale(sx, sy, (x0 + x1) / 2, (y0 + y1) / 2))
+        self.sync()
 
     def apply_position(self):
-        b = self.target_bounds()
-        if not b or (self.v_x.get() == self._shown.get("x") and self.v_y.get() == self._shown.get("y")):
+        if not self.target() or (self.v_x.get() == self._shown.get("x")
+                                 and self.v_y.get() == self._shown.get("y")):
             return
         x, y = self._len(self.v_x, "X"), self._len(self.v_y, "Y")
-        if x is None or y is None:
-            return
-        x0, y0, x1, y1 = b
-        self.apply_transform(translate(x - (x0 + x1) / 2, y - (y0 + y1) / 2))
+        if x is not None and y is not None:
+            self._arrange(self.doc.move_to, self.target(), x, y)
 
     def rotate_by(self, degrees: float):
-        b = self.target_bounds()
-        if b:
-            x0, y0, x1, y1 = b
-            self.apply_transform(rotate(degrees, (x0 + x1) / 2, (y0 + y1) / 2))
+        self._arrange(self.doc.rotate, self.target(), degrees)
 
     def rotate_by_entry(self):
         deg = self._num(self.v_rot, "Angle")
@@ -2031,39 +1154,15 @@ class App:
             self.rotate_by(deg)
 
     def centre_target(self):
-        b = self.target_bounds()
-        if b:
-            x0, y0, x1, y1 = b
-            self.apply_transform(translate(-(x0 + x1) / 2, -(y0 + y1) / 2))
+        self._arrange(self.doc.centre, self.target())
 
     def fit_target(self):
-        b = self.target_bounds()
-        if not b:
-            return
-        x0, y0, x1, y1 = b
-        aw, ah = self.hoop[0] - 2 * self.margin, self.hoop[1] - 2 * self.margin
         # leave room for stitches that reach past the outlines (satin, fill pull)
-        if self.plan is not None:
-            reach = [self.plan.report.object_bounds.get(i) for i in self.target()]
-            reach = [r for r in reach if r]
-            if reach:
-                ex = max(x0 - min(r[0] for r in reach), 0) + max(max(r[2] for r in reach) - x1, 0)
-                ey = max(y0 - min(r[1] for r in reach), 0) + max(max(r[3] for r in reach) - y1, 0)
-                aw, ah = aw - ex - 0.1, ah - ey - 0.1
-        limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 1e-6 and a > 0]
-        if not limits:
-            return
-        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-        self.apply_transform(chain(translate(-cx, -cy), scale(min(limits))))
+        reach = self.plan.report.object_bounds if self.plan is not None else None
+        self._arrange(self.doc.fit, self.target(), reach)
 
     def reset_target(self):
-        ids = self.target()
-        if not ids:
-            return
-        self.push_undo()
-        for i in ids:
-            self.mats[i] = self.home[i]
-        self.refresh()
+        self._arrange(self.doc.reset, self.target())
 
     def nudge(self, dx, dy, event):
         sel = self.selection()
@@ -2080,8 +1179,8 @@ class App:
         p = self.from_canvas(cx, cy)
         tol = 6 * self.ui / self.px
         best = None
-        for oid in reversed(self.order_ids):
-            if oid in self.skipped:
+        for oid in reversed(self.doc.order_ids):
+            if oid in self.doc.skipped:
                 continue
             for pts in self.placed.get(oid, []):
                 d = min((segment_distance(p, a, b) for a, b in zip(pts, pts[1:])), default=1e9)
@@ -2104,7 +1203,7 @@ class App:
         x0, x1 = sorted((x0, x1))
         y0, y1 = sorted((y0, y1))
         out = []
-        for oid in self.order_ids:
+        for oid in self.doc.order_ids:
             b = self.target_bounds([oid])
             if b and x0 <= b[0] and y0 <= b[1] and b[2] <= x1 and b[3] <= y1:
                 out.append(oid)
@@ -2124,7 +1223,7 @@ class App:
                 cursor = "sizing"
             elif self._in_box(e.x, e.y):
                 cursor = "fleur"
-        if not cursor and self.order_ids and self.hit_test(e.x, e.y)[1]:
+        if not cursor and self.doc.order_ids and self.hit_test(e.x, e.y)[1]:
             cursor = "hand2"
         self.canvas.configure(cursor=cursor)
 
@@ -2138,7 +1237,7 @@ class App:
 
     def on_press(self, e):
         self.canvas.focus_set()
-        if not self.order_ids:
+        if not self.doc.order_ids:
             return
         p = (e.x, e.y)
         additive = bool(e.state & (SHIFT | CONTROL))
@@ -2252,8 +1351,7 @@ class App:
     def _setting_changed(self, replan: bool = True):
         """A Stitching-tab setting changed: it's saved in the project, so the design now
         has unsaved changes (opening a project sets these too, then clears the flag)."""
-        if self.order_ids:
-            self.dirty = True
+        self.doc.mark_changed()
         if replan:
             self.schedule()
 
@@ -2269,63 +1367,37 @@ class App:
         except ValueError:
             raise ValueError("Hoop size and margin must be numbers") from None
         if hoop[0] > 0 and hoop[1] > 0:
-            self.hoop, self.margin = hoop, margin
+            self.doc.set_hoop(hoop, margin)
 
     def refresh(self):
         self._job = None
-        self.placed = {}
-        if not self.order_ids:
-            self.plan = None
-            self.track = Track()
-            self.sim_reset()
-            self.b_save.configure(state="disabled")
-            self.fill_order()
-            self.l_info.configure(text="")
-            self.update_arrange_fields()
-            self.draw_preview()
-            return
-        objs = []
-        for oid in self.order_ids:
-            o = self.obj(oid)
-            polys = [Polyline(apply(self.mats[oid], pl.points), pl.closed) for pl in o.polylines]
-            self.placed[oid] = [pl.points for pl in polys]
-            objs.append(DesignObject(o.index, oid, o.kind, o.source_color, polys,
-                                     color=self.colours.get(oid, o.source_color),
-                                     skipped=oid in self.skipped,
-                                     fill=self._placed_fill(oid),
-                                     outline=oid not in self.no_outline,
-                                     satin=self.satins.get(oid),
-                                     stitches=o.stitches))
-        design = Design(objs, list(self.warnings))
         try:
             self._read_hoop()
-            stitch = float(self.v_stitch.get())
-            spm = max(100, int(float(self.v_spm.get())))
-            plan = plan_design(design, hoop_mm=self.hoop, margin_mm=self.margin,
-                               settings=Settings(stitch_len=stitch, keep_order=self.v_keep.get(),
-                                                 knockout=self.v_knockout.get(), machine_spm=spm,
-                                                 color_order=tuple(self.color_order)),
-                               placed=True)
+            settings = Settings(stitch_len=float(self.v_stitch.get()), keep_order=self.v_keep.get(),
+                                knockout=self.v_knockout.get(),
+                                machine_spm=max(100, int(float(self.v_spm.get()))))
+            res = self.doc.plan(settings)
         except ValueError:
-            plan, err = None, "Hoop, margin, stitch length and machine speed must be numbers."
-        except ConversionError as e:
-            plan, err = None, str(e)
-        self.plan = plan
-        self.track = Track(plan.pattern) if plan else Track()
+            res = PlanResult(None, "Hoop, margin, stitch length and machine speed must be numbers.",
+                             self.doc.build_design()[1])
+        self.placed = res.placed
+        self.plan = res.plan
+        self.outside, self.outside_stitches_only = res.outside, res.outside_stitches_only
+        self.track = Track(res.plan.pattern) if res.plan else Track()
         self.sim_reset()
-        self.outside = outside_hoop(design, self.hoop, self.margin, plan.report) if plan else []
-        # objects whose outline fits but whose satin / fill edge doesn't
-        self.outside_stitches_only = [i for i in self.outside if i not in
-                                      outside_hoop(design, self.hoop, self.margin)]
         self.fill_order()
         self.update_arrange_fields()
         self.draw_preview()
-        if plan is None:
+        if not self.doc.order_ids:
             self.b_save.configure(state="disabled")
             self.l_info.configure(text="")
-            self.set_status(err, ERROR_COLOUR)
             return
-        rep = plan.report
+        if res.plan is None:
+            self.b_save.configure(state="disabled")
+            self.l_info.configure(text="")
+            self.set_status(res.error, ERROR_COLOUR)
+            return
+        rep = res.plan.report
         self.l_info.configure(
             text=f"{self._len_text(rep.width_mm)[:-3]} × {self._len_text(rep.height_mm)}"
                  f"  ·  {rep.stitch_count} stitches"
@@ -2372,11 +1444,6 @@ class App:
                  f"sewing + {format_minutes(rep.change_minutes)} for {rep.color_blocks - 1} "
                  f"thread change(s)")
 
-    def _stop_keys(self, tu) -> list:
-        """(phase, rgb) keys of the parts sewn in one colour stop (fills, then outlines)."""
-        phases = sorted({0 if lab.endswith(" fill") else 1 for lab in tu.object_ids})
-        return [(ph, tuple(tu.rgb)) for ph in phases]
-
     def move_stop(self, step: int):
         """Move the selected colour stop earlier or later in the sewing order."""
         sel = self.order.selection()
@@ -2387,36 +1454,22 @@ class App:
             self.set_status("Untick 'Keep drawing order' (Stitching tab) to reorder colour stops.",
                             WARN_COLOUR)
             return
-        tmap = self.plan.report.thread_map
-        i = int(sel[0])
-        j = i + step
-        if not 0 <= j < len(tmap):
+        try:
+            moved = self.doc.move_stop(self.plan.report.thread_map, int(sel[0]), step)
+        except DocError as e:
+            return self._doc_error(e)
+        if moved is None:
             return
-        keys = [self._stop_keys(tu) for tu in tmap]
-        before = [k for ks in keys for k in ks]
-        keys[i], keys[j] = keys[j], keys[i]
-        # fills always come before outlines: keep the new order within each group, so a
-        # stop holding a fill and an outline moves its fill among the fills
-        order = sorted((k for ks in keys for k in ks), key=lambda k: k[0])
-        if order == before:
-            self.set_status("Fills are always sewn before outlines, so this stop can't move past "
-                            "that one.", WARN_COLOUR)
-            return
-        self.push_undo()
-        self.color_order = order
-        self.refresh()
-        # keep the moved stop selected (find it by its first key)
-        moved = keys[j][0]
+        self.sync()
         for n, tu in enumerate(self.plan.report.thread_map if self.plan else []):
-            if moved in self._stop_keys(tu):
+            if moved in Document.stop_keys(tu):          # keep the moved stop selected
                 self.order.selection_set(str(n))
                 break
 
     def auto_order(self):
-        if self.color_order:
-            self.push_undo()
-            self.color_order = []
-            self.refresh()
+        if self.doc.color_order:
+            self.doc.auto_order()
+            self.sync()
         self.set_status("Automatic sewing order: fewest colour changes, fills before outlines.")
 
     # ---------------------------------------------------------------- preview drawing
@@ -2446,17 +1499,17 @@ class App:
         cw, ch = cv.winfo_width(), cv.winfo_height()
         if cw < 20 or ch < 20:
             return
-        if not self.order_ids:
+        if not self.doc.order_ids:
             cv.create_text(cw / 2, ch / 2, text="Open an SVG or add text to start.",
                            fill="#777777", font=ui_font(cv, size=11))
             return
-        hw, hh = self.hoop
+        hw, hh = self.doc.hoop
         self.px = max(0.2, min((cw - 24) / hw, (ch - 24) / hh)) * self.zoom
         vx, vy = self.view_c
         self.origin = (cw / 2 - vx * self.px, ch / 2 - vy * self.px)
         self.l_zoom.configure(text=f"{self.zoom:.0%}")
         ss = 1 if (fast or self.sim_playing) else 2      # 2x then shrink smooths the lines
-        img = render_view(self.track, self._view(ss), self.hoop, self.margin, self._style(),
+        img = render_view(self.track, self._view(ss), self.doc.hoop, self.doc.margin, self._style(),
                           self.sim_pos)
         if ss > 1:
             img = img.resize((cw, ch), Image.LANCZOS)
@@ -2477,12 +1530,12 @@ class App:
     def zoom_at(self, factor: float, cx: float, cy: float):
         """Zoom by factor, keeping the point under canvas (cx, cy) still."""
         new = max(0.5, min(MAX_ZOOM, self.zoom * factor))
-        if abs(new - self.zoom) < 1e-9 or not self.order_ids:
+        if abs(new - self.zoom) < 1e-9 or not self.doc.order_ids:
             return
         mx, my = self.from_canvas(cx, cy)
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
         self.zoom = new
-        px = max(0.2, min((cw - 24) / self.hoop[0], (ch - 24) / self.hoop[1])) * new
+        px = max(0.2, min((cw - 24) / self.doc.hoop[0], (ch - 24) / self.doc.hoop[1])) * new
         self.view_c = (mx - (cx - cw / 2) / px, my - (cy - ch / 2) / px)
         self.draw_preview(fast=True)
 
