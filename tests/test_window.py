@@ -33,6 +33,43 @@ def test_settings_changes_mark_the_design_modified(app, tmp_path, monkeypatch):
     assert app.v_margin.get() == "4"
 
 
+def _red_square_png(tmp_path):
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (60, 60), "white")
+    ImageDraw.Draw(img).rectangle((15, 15, 45, 45), fill="red")
+    path = str(tmp_path / "pic.png")
+    img.save(path)
+    return path
+
+
+def _fake_image_dialog(result):
+    class FakeDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def wait(self):
+            return result
+    return FakeDialog
+
+
+def test_cancelling_a_picture_open_keeps_the_current_design(app, tmp_path, monkeypatch):
+    app.open(SAMPLE)
+    before = list(app.doc.order_ids)
+    monkeypatch.setattr(gui, "ImageDialog", _fake_image_dialog(None))
+    app.open(_red_square_png(tmp_path))
+    assert app.doc.order_ids == before and app.doc.svg_path == SAMPLE
+
+
+def test_opening_a_picture_replaces_the_design_once_traced(app, tmp_path, monkeypatch):
+    from stitchwright.image_import import TraceSettings
+    app.open(SAMPLE)
+    monkeypatch.setattr(gui, "ImageDialog", _fake_image_dialog((TraceSettings(colours=1), True)))
+    pic = _red_square_png(tmp_path)
+    app.open(pic)
+    assert app.doc.order_ids and all(i.startswith("picture") for i in app.doc.order_ids)
+    assert app.doc.svg_path == pic
+
+
 def test_ctrl_enter_in_the_text_dialog_presses_ok_without_a_new_line(window):
     from conftest import any_font
     from stitchwright.dialogs import TextDialog

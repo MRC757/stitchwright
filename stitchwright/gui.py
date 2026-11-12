@@ -638,8 +638,7 @@ class App:
             self.open_project(path)
             return
         if ext in IMAGE_EXTENSIONS:
-            self.new_design(confirm=False)
-            self.import_image(path)
+            self.import_image(path, replace_design=True)
             return
         try:
             design = self._load_any(path)
@@ -800,25 +799,38 @@ class App:
         if path:
             self.import_image(path)
 
-    def import_image(self, path: str):
-        """Trace a picture into filled shapes and add them to the design."""
+    def _trace_picture(self, path: str):
+        """Ask how to trace a picture, then trace it. Returns (objects, fill), or None if
+        the user cancelled or nothing came of it (the reason has been shown)."""
         width = min(80.0, self.doc.hoop[0] - 2 * self.doc.margin)
         try:
             res = ImageDialog(self.root, self.ui, path, width).wait()
         except OSError as e:
             messagebox.showerror(TITLE, f"Could not open {path}:\n\n{e}", parent=self.root)
-            return
+            return None
         if res is None:
-            return
+            return None
         settings, fill = res
         try:
             objects, warnings = trace_image(path, settings)
         except (OSError, ValueError) as e:
             messagebox.showerror(TITLE, f"Could not trace {path}:\n\n{e}", parent=self.root)
-            return
+            return None
         if not objects:
             self.set_status("; ".join(warnings) or "Nothing to stitch in that picture.", WARN_COLOUR)
+            return None
+        return objects, fill
+
+    def import_image(self, path: str, replace_design: bool = False):
+        """Trace a picture into filled shapes and add them to the design, or (with
+        replace_design) start a new design from them. The design is only replaced once
+        the picture has been traced, so cancelling or a bad file loses nothing."""
+        traced = self._trace_picture(path)
+        if traced is None:
             return
+        if replace_design:
+            self.new_design(confirm=False)
+        objects, fill = traced
         new_ids = self.doc.add_traced(objects, fill)
         self.sync(select=new_ids)
         if self.doc.svg_path is None:
