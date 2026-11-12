@@ -696,7 +696,8 @@ class App:
         self.v_ratio = tk.BooleanVar(value=True)
         for v in (self.v_hoop_w, self.v_hoop_h, self.v_margin, self.v_stitch, self.v_keep,
                   self.v_knockout, self.v_spm):
-            v.trace_add("write", lambda *a: self.schedule())
+            v.trace_add("write", lambda *a: self._setting_changed())
+        self.v_pes.trace_add("write", lambda *a: self._setting_changed(replan=False))
         self.v_jumps.trace_add("write", lambda *a: self.draw_preview())
         self.v_dots.trace_add("write", lambda *a: self.draw_preview())
 
@@ -2251,6 +2252,14 @@ class App:
         self.update_arrange_fields()
 
     # ---------------------------------------------------------------- planning
+    def _setting_changed(self, replan: bool = True):
+        """A Stitching-tab setting changed: it's saved in the project, so the design now
+        has unsaved changes (opening a project sets these too, then clears the flag)."""
+        if self.order_ids:
+            self.dirty = True
+        if replan:
+            self.schedule()
+
     def schedule(self, delay: int = 300):
         if self._job is not None:
             self.root.after_cancel(self._job)

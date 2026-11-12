@@ -28,7 +28,7 @@ def test_repeat_guard_stops_dialog_storms():
     assert g.should_show(11.2)            # a while later: show again
 
 
-def test_errors_in_window_handlers_are_logged_and_reported(tmp_path, monkeypatch):
+def test_errors_in_window_handlers_are_logged_and_reported(tmp_path, monkeypatch, tk_root, window):
     import tkinter as tk
     from tkinter import messagebox
     from svg2pes import gui
@@ -36,22 +36,20 @@ def test_errors_in_window_handlers_are_logged_and_reported(tmp_path, monkeypatch
     path = setup_logging(str(tmp_path))
     shown = []
     monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: shown.append(a))
-    root = tk.Tk()
-    root.withdraw()
+    app = gui.App(window)
+    app.log_path = path
+    old = tk_root.report_callback_exception
+    tk_root.report_callback_exception = app.on_exception
     try:
-        app = gui.App(root)
-        app.log_path = path
-        root.report_callback_exception = app.on_exception
-
         def broken():
             raise RuntimeError("deliberate test failure")
 
-        b = tk.Button(root, command=broken)
+        b = tk.Button(window, command=broken)
         b.invoke()                       # Tk routes the error to report_callback_exception
         b.invoke()                       # straight away again: logged, but no second dialog
-        root.update()
+        window.update()
     finally:
-        root.destroy()
+        tk_root.report_callback_exception = old
     for h in log.handlers:
         h.flush()
     text = open(path, encoding="utf-8").read()
