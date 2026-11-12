@@ -19,6 +19,7 @@ import time
 import tkinter as tk
 from dataclasses import replace
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from PIL import Image, ImageTk
 
@@ -56,6 +57,24 @@ SIM_FRAME_MS = 33
 NEEDLE_COLOUR = "#d32f2f"
 MAX_ZOOM = 60.0
 TEXT_WIDGETS = ("Entry", "TEntry", "Text", "TCombobox", "TSpinbox", "Spinbox")
+
+
+_FONTS: dict = {}
+
+
+def ui_font(widget, size: int | None = None, bold: bool = False) -> tkfont.Font:
+    """The platform's default UI font (Segoe UI on Windows), optionally resized or bold.
+    Fonts are cached: Tk forgets a named font when its Python object is garbage-collected."""
+    key = (str(widget.tk), size, bold)
+    f = _FONTS.get(key)
+    if f is None:
+        f = tkfont.nametofont("TkDefaultFont", root=widget).copy()
+        if size:
+            f.configure(size=size)
+        if bold:
+            f.configure(weight="bold")
+        _FONTS[key] = f
+    return f
 
 
 def swatch(master, colours: list[str], size: int, gap: int = 6) -> tk.PhotoImage:
@@ -137,7 +156,7 @@ class ThreadPicker(tk.Toplevel):
                                 fill=to_hex(t.rgb), outline="#777777", tags=(tag,))
             cv.create_text(x + int(42 * ui), y + ch / 2, anchor="w", tags=(tag,),
                            text=f"{t.number}  {t.name}",
-                           font=("Segoe UI", 9, "bold") if selected else ("Segoe UI", 9))
+                           font=ui_font(cv, bold=selected))
             cv.tag_bind(tag, "<Enter>", lambda e, i=i, t=t: self._hover(cv, i, t))
             cv.tag_bind(tag, "<Leave>", lambda e, i=i: cv.itemconfigure(self._bg[i], fill="white"))
             cv.tag_bind(tag, "<Button-1>", lambda e, t=t: self._done(t))
@@ -197,7 +216,7 @@ class TextDialog(tk.Toplevel):
         f.pack(fill="both", expand=True)
         ttk.Label(f, text="Text").grid(row=0, column=0, sticky="nw", pady=2)
         self.t_text = tk.Text(f, width=44, height=3, wrap="none", undo=True,
-                              font=("Segoe UI", 11))
+                              font=ui_font(self, size=11))
         self.t_text.grid(row=0, column=1, columnspan=3, sticky="we", pady=2)
         self.t_text.insert("1.0", spec.text)
 
@@ -804,7 +823,7 @@ class App:
         # Arrange -----------------------------------------------------------
         f_arr = ttk.Frame(tabs, padding=8)
         tabs.add(f_arr, text=" Arrange ")
-        self.l_target = ttk.Label(f_arr, text="Everything", font=("Segoe UI", 9, "bold"))
+        self.l_target = ttk.Label(f_arr, text="Everything", font=ui_font(f_arr, bold=True))
         self.l_target.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
         self.l_size = ttk.Label(f_arr, text="Size (mm)")
         self.l_size.grid(row=1, column=0, sticky="w")
@@ -2451,7 +2470,7 @@ class App:
             return
         if not self.order_ids:
             cv.create_text(cw / 2, ch / 2, text="Open an SVG or add text to start.",
-                           fill="#777777", font=("Segoe UI", 11))
+                           fill="#777777", font=ui_font(cv, size=11))
             return
         hw, hh = self.hoop
         self.px = max(0.2, min((cw - 24) / hw, (ch - 24) / hh)) * self.zoom

@@ -170,23 +170,6 @@ def _orient(run: Run, here: Point) -> tuple[Run, float]:
     return run, d0
 
 
-def _order_runs(runs: list[Run], start: Point) -> list[Run]:
-    remaining = list(runs)
-    ordered: list[Run] = []
-    here = start
-    while remaining:
-        best = None
-        for i, r in enumerate(remaining):
-            oriented, dist = _orient(r, here)
-            if best is None or dist < best[0]:
-                best = (dist, i, oriented)
-        _, i, oriented = best
-        remaining.pop(i)
-        ordered.append(oriented)
-        here = oriented.points[-1]
-    return ordered
-
-
 def _bbox(rings):
     xs = [p[0] for r in rings for p in r]
     ys = [p[1] for r in rings for p in r]
@@ -248,19 +231,19 @@ def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
     and outline follow the SVG paint order. s.color_order can reorder the groups."""
     filled = []                     # rings of filled shapes, for cutting the fills below them
     for i, o in enumerate(objects):
-        if getattr(o, "fill", None) is not None:
+        if o.fill is not None:
             rings = closed_rings(o.polylines)
             if rings:
                 filled.append((i, rings, _bbox(rings)))
 
     parts: list[tuple] = []         # (colour, units, 0 = fill / 1 = outline)
     for idx, obj in enumerate(objects):
-        if getattr(obj, "stitches", None):
+        if obj.stitches:
             runs = _stitch_runs(obj)
             if runs:
                 parts.append((obj.color, [runs], 1))
             continue
-        if getattr(obj, "fill", None) is not None:
+        if obj.fill is not None:
             cut = None
             if s.knockout:
                 mine = closed_rings(obj.polylines)
@@ -269,8 +252,8 @@ def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
             runs = _fill_runs(obj, s, cut)
             if runs:
                 parts.append((obj.fill.color or obj.color, [runs], 0))
-        if getattr(obj, "outline", True):
-            if getattr(obj, "satin", None) is not None:
+        if obj.outline:
+            if obj.satin is not None:
                 units = [[r] for r in _satin_runs(obj, s)]
             else:
                 units = [[r] for r in _make_runs(obj, s)]
