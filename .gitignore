@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Partly written output from a failed save
+*.part
+
+# Brother manual pages (copyright Brother; the colour data lives in svg2pes/palette.py)
+Thread Colors.pdf
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

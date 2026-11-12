@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="40mm" viewBox="0 0 60 40">
+  <rect id="badge" x="2" y="2" width="56" height="36" rx="5" fill="#1f4fa3" stroke="none"/>
+  <circle id="sun" cx="45" cy="13" r="6" fill="#f2c200"/>
+  <path id="letterF" d="M10 10 H22 M10 10 V30 M10 20 H19" fill="none" stroke="#ffffff" stroke-width="2"/>
+  <polygon id="star" points="32,24 34,29 39,29 35,32 37,37 32,34 27,37 29,32 25,29 30,29" fill="#d62828"/>
+  <polyline id="wave" points="8,35 14,33 20,35 26,33" fill="none" stroke="#7bd88f"/>
+  <text x="5" y="5">ignored</text>
+</svg>
