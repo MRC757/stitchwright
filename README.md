@@ -118,3 +118,7 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 [svgelements](https://github.com/meerk40t/svgelements) (SVG parsing), Pillow and NumPy.
 Brother and PE540D are trademarks of Brother Industries, Ltd. This project is not affiliated
 with Brother.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
