@@ -212,6 +212,23 @@ def test_fill_under_a_stacked_shape_is_cut_out():
     assert any(10.5 < p[0] < 19.5 and 10.5 < p[1] < 19.5 for p in low2)
 
 
+def test_cut_out_fill_reaches_a_little_under_the_shape_on_top():
+    from stitchwright.fill import KNOCKOUT_OVERLAP_MM, FillSpec
+    from stitchwright.stitching import Settings, plan_blocks
+    from stitchwright.svg_import import DesignObject
+    lower = DesignObject(1, "low", "Rect", (255, 0, 0), [square(0, 0, 30, 30)], color=(255, 0, 0),
+                         fill=FillSpec(angle=0, underlay=False))
+    upper = DesignObject(2, "up", "Rect", (0, 0, 255), [square(10, 10, 20, 20)], color=(0, 0, 255),
+                         fill=FillSpec(angle=0, underlay=False))
+    blocks = plan_blocks([lower, upper], Settings())
+    beside = [p[0] for b in blocks for r in b.runs if r.object_id == "low" and r.fill
+              for p in r.points if 11 < p[1] < 19]      # rows level with the upper square
+    left = max(x for x in beside if x < 15)
+    right = min(x for x in beside if x > 15)
+    assert left == pytest.approx(10 + KNOCKOUT_OVERLAP_MM)
+    assert right == pytest.approx(20 - KNOCKOUT_OVERLAP_MM)
+
+
 def test_travel_joins_fill_pieces_instead_of_jumping():
     from stitchwright.fill import FillSpec, fill_paths
     from stitchwright.svg_import import Polyline

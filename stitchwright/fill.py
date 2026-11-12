@@ -34,6 +34,7 @@ RGB = tuple[int, int, int]
 CLOSE_GAP_MM = 0.5     # outlines whose ends are this close count as closed
 MAX_TRAVEL_MM = 40.0   # longer trips along the edge are left as jumps
 NONZERO, EVENODD = "nonzero", "evenodd"    # fill rules, as SVG names them
+KNOCKOUT_OVERLAP_MM = 0.4   # a cut-out fill still reaches this far under the shape on top
 
 
 @dataclass(frozen=True)
@@ -151,7 +152,11 @@ def _rows(rings, cutouts, angle, spacing, inset=0.0, extend=0.0, rule=NONZERO):
         segs = [(a - extend + inset, b + extend - inset) for a, b in _spans(edges, y, rule)]
         segs = [(p, q) for p, q in segs if q - p > 1e-6]
         for ce, ce_rule in cut_edges:
-            cuts = _spans(ce, y, ce_rule)
+            # the fill below runs a little way under the shape on top, so that fabric
+            # pulled in by the stitches doesn't open a gap between the two
+            cuts = [(a + KNOCKOUT_OVERLAP_MM, b - KNOCKOUT_OVERLAP_MM)
+                    for a, b in _spans(ce, y, ce_rule)]
+            cuts = [(a, b) for a, b in cuts if b > a]
             if cuts:
                 segs = _subtract(segs, cuts)
         rows.append((y, [(p, q) for p, q in segs if q - p > 0.3]))
