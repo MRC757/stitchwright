@@ -392,3 +392,58 @@ def test_render_view_zoomed_and_partly_sewn():
     zoomed = render_view(t, View(-30, -20, 80, 800, 800), (100, 100), style=Style())
     assert zoomed.size == (800, 800)
     assert BACKGROUND in {c for _, c in zoomed.getcolors(1 << 20)}
+
+
+# --- fill stitching -------------------------------------------------------------
+
+def _square(x0, y0, x1, y1):
+    from svg2pes.svg_import import Polyline
+    return Polyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], True)
+
+
+def test_fill_covers_a_rectangle_with_rows():
+    from svg2pes.fill import FillSpec, fill_paths
+    paths = fill_paths([_square(0, 0, 20, 10)], FillSpec(angle=0, spacing=0.5, stitch_len=3.5))
+    assert len(paths) == 1                                   # convex: one serpentine run
+    pts = paths[0]
+    assert all(-1e-6 <= x <= 20 + 1e-6 and -1e-6 <= y <= 10 + 1e-6 for x, y in pts)
+    rows = sorted({round(y, 3) for _, y in pts})
+    assert len(rows) == 20 and rows[0] == 0.25               # 10 mm / 0.5 mm, half a row in
+    steps = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
+    assert max(steps) <= 3.5 + 0.4 + 1e-6 and min(steps) >= 0.4 - 1e-6
+
+
+def test_fill_leaves_holes_empty_and_follows_the_angle():
+    from svg2pes.fill import FillSpec, fill_paths
+    ring = [_square(0, 0, 20, 20), _square(6, 6, 14, 14)]
+    paths = fill_paths(ring, FillSpec(angle=30, spacing=0.4))
+    pts = [p for path in paths for p in path]
+    inside_hole = [p for p in pts if 6.3 < p[0] < 13.7 and 6.3 < p[1] < 13.7]
+    assert pts and not inside_hole
+    assert len(paths) >= 2                                   # the hole splits the rows
+
+
+def test_fills_sew_before_outlines_and_share_a_block(tmp_path):
+    from svg2pes.svg_import import Design, DesignObject
+    a = DesignObject(1, "a", "Rect", (255, 0, 0), [_square(-20, -10, 0, 10)], color=(255, 0, 0))
+    b = DesignObject(2, "b", "Rect", (0, 0, 255), [_square(5, -10, 25, 10)], color=(0, 0, 255))
+    d = Design([a, b], [])
+    plan = plan_design(d, placed=True, fills={"a": None, "b": "Yellow"})
+    labels = [tu.object_ids for tu in plan.report.thread_map]
+    # red fill, yellow fill, then outlines: blue, and red sharing nothing with yellow
+    assert labels[0] == ["a fill"] and labels[1] == ["b fill"]
+    assert sorted(sum(labels[2:], [])) == ["a", "b"]
+    assert plan.report.thread_map[1].thread.name == "Yellow"
+    # fill in the outline's own thread shares a block with that outline
+    plan2 = plan_design(Design([a], []), placed=True, fills={"a": None})
+    assert [tu.object_ids for tu in plan2.report.thread_map] == [["a fill", "a"]]
+    plan3 = plan_design(Design([a], []), placed=True, fills={"a": None}, no_outline=["a"])
+    assert [tu.object_ids for tu in plan3.report.thread_map] == [["a fill"]]
+    assert plan2.report.stitch_count > plan3.report.stitch_count > 300   # outline adds stitches
+
+
+def test_open_shapes_cannot_be_filled(tmp_path):
+    with pytest.raises(ConversionError, match="not a closed shape"):
+        convert(SAMPLE, str(tmp_path / "o.pes"), fills={"wave": None})
+    rep = convert(SAMPLE, str(tmp_path / "o.pes"), fills={"star": "Red", "sun": None})
+    assert rep.stitch_count > 400          # 200 without the fills

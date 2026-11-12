@@ -5,6 +5,7 @@ import argparse
 import sys
 
 from .convert import ConversionError, Settings, convert, describe_objects
+from .fill import FillSpec
 from .palette import brother_threads, to_hex
 from .svg_import import load_svg
 
@@ -16,6 +17,14 @@ def _pairs(items: list[str] | None, what: str) -> dict[str, str]:
             raise SystemExit(f"{what} expects NAME=COLOUR, got {it!r}")
         k, v = it.split("=", 1)
         out[k.strip()] = v.strip()
+    return out
+
+
+def _fills(items: list[str] | None) -> dict[str, str | None]:
+    out: dict[str, str | None] = {}
+    for it in items or []:
+        k, _, v = it.partition("=")
+        out[k.strip()] = v.strip() or None
     return out
 
 
@@ -47,6 +56,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--map", action="append", metavar="OLD=NEW",
                    help="change every object of one source colour; repeatable")
     p.add_argument("--skip", action="append", metavar="OBJECT", help="leave an object out; repeatable")
+    p.add_argument("--fill", action="append", metavar="OBJECT[=COLOUR]",
+                   help="fill a closed shape (in COLOUR, else its own thread); repeatable")
+    p.add_argument("--no-outline", action="append", metavar="OBJECT",
+                   help="don't sew this object's outline (e.g. a filled shape); repeatable")
+    p.add_argument("--fill-angle", type=float, default=45.0, help="fill row angle in degrees (default 45)")
+    p.add_argument("--fill-spacing", type=float, default=0.4,
+                   help="mm between fill rows, smaller is denser (default 0.4)")
+    p.add_argument("--fill-stitch", type=float, default=3.5, help="fill stitch length in mm (default 3.5)")
     p.add_argument("--width", type=float, metavar="MM", help="scale the design to this width in mm")
     p.add_argument("--fit", action="store_true", help="scale down to fit the hoop if too big")
     p.add_argument("--hoop", type=_hoop, default=(100.0, 100.0), help="hoop size in mm (default 100x100 for PE540D)")
@@ -84,7 +101,9 @@ def main(argv: list[str] | None = None) -> int:
             overrides=_pairs(a.set, "--set"), color_map=_pairs(a.map, "--map"), skip=a.skip,
             width_mm=a.width, fit=a.fit, hoop_mm=a.hoop, margin_mm=a.margin,
             settings=Settings(stitch_len=a.stitch_len, keep_order=a.keep_order),
-            pes_version=a.pes_version, snap=not a.no_snap, preview_path=a.preview)
+            pes_version=a.pes_version, snap=not a.no_snap, preview_path=a.preview,
+            fills=_fills(a.fill), no_outline=a.no_outline,
+            fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch))
     except OSError as e:
         print(f"error: {e.strerror or e}: {e.filename or ''}".rstrip(": "), file=sys.stderr)
         return 2

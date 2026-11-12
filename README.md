@@ -3,8 +3,9 @@
 Turn simple SVG artwork into Brother **.PES** embroidery files, with a desktop window for
 choosing thread colours and previewing the stitches.
 
-Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Milestone 1 sews
-**run-stitch outlines**. Fill and satin stitches are not built yet.
+Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Outlines are sewn as
+run stitches, and closed shapes can be filled with fill (tatami) stitches. Satin stitch is
+not built yet.
 
 ![svg2pes window](docs/screenshot.png)
 
@@ -21,7 +22,10 @@ Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). Milestone 1 se
   and no stitch is shorter than 0.4 mm (very short stitches tend to break the thread).
 - Lets you move, resize and rotate objects in the hoop, by dragging in the preview or by
   typing sizes, positions and angles. Undo and redo are included.
-- Adds text in any installed font, sewn as letter outlines.
+- Fills closed shapes with fill stitches (tatami) at the angle and density you choose, in the
+  outline's thread or another one. Fills are sewn before outlines, so the outlines cover the
+  fill's edges.
+- Adds text in any installed font, sewn as letter outlines (or filled).
 - Shows the real stitches: zoom in to see each stitch and needle point, or watch a sew-out
   simulation that stitches the design in machine order and stops at each colour change.
 - Checks that everything fits inside the hoop and its margin, and checks each saved file by
@@ -82,9 +86,14 @@ macOS.
    of the capitals; 8 mm or more sews best). The text appears in the middle of the hoop in
    900 Black. Drag it into place and change its thread like any other object. Double-click
    it to edit, or press **Delete text** to remove it.
-5. Check the **Stitching** tab (hoop, margin, stitch length) and the **Sewing order** tab (one
+5. **Fill shapes.** Select closed shapes (such as the wings of a butterfly) and press
+   **Fill…**, or double-click the **Fill** column. Choose the thread (the outline's, or another),
+   the angle of the stitch rows, the row spacing (0.4 mm is typical; smaller is denser) and the
+   stitch length. Untick *Also sew the outline* for a fill without a border. Open shapes, like
+   a line, can't be filled.
+6. Check the **Stitching** tab (hoop, margin, stitch length) and the **Sewing order** tab (one
    row per thread change on the machine).
-6. **Check the stitches** (see below), then **Save PES…** (Ctrl+S). It suggests a short file
+7. **Check the stitches** (see below), then **Save PES…** (Ctrl+S). It suggests a short file
    name without spaces for the USB stick.
 
 Undo and Redo (Ctrl+Z / Ctrl+Y) cover every change in the window.
@@ -126,6 +135,11 @@ The preview is drawn from the stitches that will be saved, not from the SVG.
 | `--keep-order` | keep the SVG drawing order (usually means more colour changes) |
 | `--pes-version 1\|6` | PES format version (default 1, tested on the PE540D) |
 | `--no-snap` | keep the exact SVG colours instead of Brother threads |
+| `--fill OBJECT[=COLOUR]` | fill a closed shape, in COLOUR or else its own thread |
+| `--no-outline OBJECT` | don't sew the outline (for a fill without a border) |
+| `--fill-angle DEG` | direction of the fill rows (default 45) |
+| `--fill-spacing MM` | distance between fill rows; smaller is denser (default 0.4) |
+| `--fill-stitch MM` | fill stitch length (default 3.5) |
 
 COLOUR can be any of these:
 - `#rrggbb`
@@ -145,8 +159,11 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 
 ## Limitations
 
-- Shapes are sewn as outlines only. Filled shapes become outlines, and fill and satin stitches
-  come in a later milestone.
+- Fills are plain tatami: there is no underlay or pull compensation yet, so use a firm
+  stabiliser. On stretchy fabric a fill can pull in slightly from its outline.
+- Where filled shapes overlap, both fills are sewn (one on top of the other). The overlap is
+  not cut out of the lower fill.
+- Satin stitch (for borders and small text) is not built yet.
 - Text inside the SVG, images, gradients and opacity are ignored. Use **Add text…** for
   lettering, or convert text to paths in your drawing program.
 - Added text is sewn as letter outlines. Small text (under about 8 mm) gets crowded, and
@@ -169,6 +186,7 @@ With `--no-snap` the machine shows the nearest Brother colour name for each thre
 | `svg2pes/stitching.py` | outline simplification, needle drops, tie stitches, ordering |
 | `svg2pes/convert.py` | sizing, colour choices, stitch planning, PES writing and checking |
 | `svg2pes/geometry.py` | move, resize and rotate transforms |
+| `svg2pes/fill.py` | fill (tatami) stitches for closed shapes |
 | `svg2pes/text.py` | text to outlines with installed fonts |
 | `svg2pes/preview.py` | draws the stitch preview (whole hoop or zoomed) and the sew-out |
 | `svg2pes/gui.py` | the Tkinter window |

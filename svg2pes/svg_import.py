@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from xml.etree import ElementTree
+
+if TYPE_CHECKING:
+    from .fill import FillSpec
 
 from svgelements import SVG, Close, Path, Shape
 
@@ -32,6 +36,8 @@ class DesignObject:
     polylines: list[Polyline] = field(default_factory=list)
     color: tuple[int, int, int] = (0, 0, 0)  # colour actually used (operator may change it)
     skipped: bool = False
+    fill: "FillSpec | None" = None           # fill the inside of this (closed) shape
+    outline: bool = True                     # sew the outline as a run stitch
 
     def bounds(self) -> tuple[float, float, float, float]:
         xs = [p[0] for pl in self.polylines for p in pl.points]
@@ -121,8 +127,8 @@ def load_svg(path: str) -> Design:
         name = type(el).__name__
         if name in ("Text", "Image"):
             warnings.append(
-                f"{name} element ignored (milestone 1 stitches vector shapes only; "
-                "convert text to paths for now)")
+                f"{name} element ignored (only vector shapes are stitched; convert text "
+                "to paths, or add it in the window with Add text)")
             continue
         if not isinstance(el, Shape):
             continue

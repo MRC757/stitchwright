@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import pyembroidery
 from pyembroidery import EmbPattern, EmbThread
 
+from .fill import FillSpec, can_fill
 from .palette import Thread, nearest_brother, parse_color, thread_for_rgb, to_hex
 from .preview import render_preview
 from .stitching import ColorBlock, Settings, plan_blocks, stitch_points
@@ -48,8 +49,12 @@ class Report:
 
 
 def apply_color_choices(design: Design, overrides: dict[str, str] | None,
-                        color_map: dict[str, str] | None, skip: list[str] | None) -> None:
-    """Apply the operator's colour picks. Per-object overrides beat source-colour maps."""
+                        color_map: dict[str, str] | None, skip: list[str] | None,
+                        fills: dict[str, str | None] | None = None,
+                        no_outline: list[str] | None = None,
+                        fill_spec: FillSpec | None = None) -> None:
+    """Apply the operator's colour picks. Per-object overrides beat source-colour maps.
+    fills maps an object to its fill colour (None = the object's own thread)."""
     by_id = {o.obj_id: o for o in design.objects}
     by_index = {str(o.index): o for o in design.objects}
 
@@ -77,16 +82,31 @@ def apply_color_choices(design: Design, overrides: dict[str, str] | None,
         find(key).color = parse_color(col)
     for key in skip or []:
         find(key).skipped = True
+    for key, col in (fills or {}).items():
+        o = find(key)
+        if not can_fill(o.polylines):
+            raise ConversionError(f"{o.obj_id} is not a closed shape, so it cannot be filled")
+        o.fill = dataclasses.replace(fill_spec or FillSpec(),
+                                     color=parse_color(col) if col else None)
+    for key in no_outline or []:
+        find(key).outline = False
 
 
-def snap_colors(design: Design) -> dict[str, RGB]:
-    """Replace every object's colour with its nearest Brother thread, so that
-    colours which end up as the same thread are sewn as one colour block.
-    Returns the colours chosen before snapping, by object id."""
+def snap_colors(design: Design, snap: bool = True) -> dict[str, RGB]:
+    """Replace every object's outline and fill colour with its nearest Brother
+    thread (unless snap is False), so that colours which end up as the same
+    thread are sewn as one colour block. Fills without their own colour take the
+    object's. Returns the colours chosen before snapping, keyed by object id
+    (outline) and "<id> fill"."""
     chosen = {}
     for o in design.objects:
         chosen[o.obj_id] = o.color
-        o.color = nearest_brother(o.color).rgb
+        if o.fill is not None:
+            fc = o.fill.color or o.color
+            chosen[f"{o.obj_id} fill"] = fc
+            o.fill = dataclasses.replace(o.fill, color=nearest_brother(fc).rgb if snap else fc)
+        if snap:
+            o.color = nearest_brother(o.color).rgb
     return chosen
 
 
@@ -184,7 +204,10 @@ def plan_design(design: Design, *,
                 margin_mm: float = 2.0,
                 settings: Settings | None = None,
                 snap: bool = True,
-                placed: bool = False) -> Plan:
+                placed: bool = False,
+                fills: dict[str, str | None] | None = None,
+                no_outline: list[str] | None = None,
+                fill_spec: FillSpec | None = None) -> Plan:
     """Turn a loaded design into stitches without writing anything.
     The design passed in is not modified.
 
@@ -195,14 +218,18 @@ def plan_design(design: Design, *,
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
     design = copy.deepcopy(design)
-    apply_color_choices(design, overrides, color_map, skip)
+    apply_color_choices(design, overrides, color_map, skip, fills, no_outline, fill_spec)
     if not design.active():
         raise ConversionError("Nothing to stitch: " + "; ".join(design.warnings or ["all objects skipped"]))
     warnings = list(design.warnings)
-    if snap:
-        chosen = snap_colors(design)
-    else:
-        chosen = {o.obj_id: o.color for o in design.objects}
+    for o in design.active():
+        if o.fill is not None:
+            if not 0.2 <= o.fill.spacing <= 3:
+                raise ConversionError(f"Fill row spacing must be 0.2-3 mm ({o.obj_id})")
+            if not 1 <= o.fill.stitch_len <= MAX_STITCH_LEN:
+                raise ConversionError(f"Fill stitch length must be 1-{MAX_STITCH_LEN:g} mm ({o.obj_id})")
+    chosen = snap_colors(design, snap)
+    if not snap:
         warnings.append("Colours not snapped: the machine will show the nearest Brother "
                         "colour name for each thread")
 
@@ -229,7 +256,7 @@ def plan_design(design: Design, *,
 
     tmap = []
     for blk in blocks:
-        ids = list(dict.fromkeys(r.object_id for r in blk.runs))
+        ids = list(dict.fromkeys(r.label for r in blk.runs))
         picked = list(dict.fromkeys(chosen[i] for i in ids))
         tmap.append(ThreadUse(ids, picked, thread_for_rgb(blk.color), blk.color))
     report = Report("", stitches, jumps, trims, len(blocks),
@@ -306,13 +333,17 @@ def convert(svg_path: str, out_path: str, *,
             settings: Settings | None = None,
             pes_version: int = 1,
             snap: bool = True,
-            preview_path: str | None = None) -> Report:
+            preview_path: str | None = None,
+            fills: dict[str, str | None] | None = None,
+            no_outline: list[str] | None = None,
+            fill_spec: FillSpec | None = None) -> Report:
     """Load an SVG, plan it and write a PES file (what the CLI uses)."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
     plan = plan_design(load_svg(svg_path), overrides=overrides, color_map=color_map, skip=skip,
                        width_mm=width_mm, fit=fit, hoop_mm=hoop_mm, margin_mm=margin_mm,
-                       settings=s, snap=snap)
+                       settings=s, snap=snap, fills=fills, no_outline=no_outline,
+                       fill_spec=fill_spec)
     report = write_pes_file(plan, out_path, pes_version)
     if preview_path:
         render_preview(plan.pattern, preview_path, hoop_mm)

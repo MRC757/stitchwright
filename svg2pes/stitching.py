@@ -1,15 +1,17 @@
-"""Turn design objects into ordered run-stitch paths (milestone 1).
+"""Turn design objects into ordered stitch paths.
 
-Every polyline is stitched as a run stitch along its outline. Fill and satin
-stitching arrive in later milestones; this module is where they will plug in.
+Outlines are sewn as run stitches. Objects with a fill also get fill rows
+(see fill.py), sewn before the outlines so the outlines sit on top and cover
+the edges of the fill.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from .fill import fill_paths
 from .svg_import import DesignObject, Point
 
 RGB = tuple[int, int, int]
@@ -33,6 +35,11 @@ class Run:
     points: list[Point]
     closed: bool
     object_id: str
+    fill: bool = False      # fill rows: points are already the needle points
+
+    @property
+    def label(self) -> str:
+        return f"{self.object_id} fill" if self.fill else self.object_id
 
 
 @dataclass
@@ -144,10 +151,10 @@ def _orient(run: Run, here: Point) -> tuple[Run, float]:
         k = min(range(len(ring)), key=lambda i: math.dist(ring[i], here))
         rot = ring[k:] + ring[:k]
         rot.append(rot[0])
-        return Run(rot, True, run.object_id), math.dist(rot[0], here)
+        return replace(run, points=rot), math.dist(rot[0], here)
     d0, d1 = math.dist(pts[0], here), math.dist(pts[-1], here)
     if d1 < d0:
-        return Run(pts[::-1], False, run.object_id), d1
+        return replace(run, points=pts[::-1]), d1
     return run, d0
 
 
@@ -168,32 +175,57 @@ def _order_runs(runs: list[Run], start: Point) -> list[Run]:
     return ordered
 
 
-def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
-    """Group objects into colour blocks and order their runs to keep jumps short."""
-    blocks: list[ColorBlock] = []
-    if s.keep_order:
-        for obj in objects:
-            runs = _make_runs(obj, s)
-            if not runs:
-                continue
-            if blocks and blocks[-1].color == obj.color:
-                blocks[-1].runs.extend(runs)
-            else:
-                blocks.append(ColorBlock(obj.color, list(runs)))
-    else:
-        by_color: dict[RGB, ColorBlock] = {}
-        for obj in objects:
-            runs = _make_runs(obj, s)
-            if not runs:
-                continue
-            blk = by_color.setdefault(obj.color, ColorBlock(obj.color))
-            blk.runs.extend(runs)
-        blocks = list(by_color.values())
+def _fill_runs(obj: DesignObject, s: Settings) -> list[Run]:
+    paths = fill_paths(obj.polylines, obj.fill, s.min_stitch)
+    return [Run(p, False, obj.obj_id, fill=True) for p in paths if len(p) >= 2]
 
+
+def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
+    """Group the runs into colour blocks, fills before outlines, ordered to keep jumps short.
+
+    Each object may contribute fill runs (in obj.fill.color) and outline runs (in
+    obj.color). Normally all fills come first, grouped by colour, then all outlines;
+    with keep_order each object's fill and outline follow the SVG paint order."""
+    parts: list[tuple[RGB, list[Run], int]] = []        # (colour, runs, 0 = fill / 1 = outline)
+    for obj in objects:
+        if getattr(obj, "fill", None) is not None:
+            runs = _fill_runs(obj, s)
+            if runs:
+                parts.append((obj.fill.color or obj.color, runs, 0))
+        if getattr(obj, "outline", True):
+            runs = _make_runs(obj, s)
+            if runs:
+                parts.append((obj.color, runs, 1))
+
+    if not s.keep_order:
+        grouped: list[list] = []
+        for phase in (0, 1):
+            by_color: dict[RGB, list] = {}
+            for color, runs, ph in parts:
+                if ph == phase:
+                    if color not in by_color:
+                        by_color[color] = [color, [], phase]
+                        grouped.append(by_color[color])
+                    by_color[color][1].extend(runs)
+        # let the outlines in the last fill colour follow straight on (no colour change)
+        fills = [g for g in grouped if g[2] == 0]
+        outlines = [g for g in grouped if g[2] == 1]
+        if fills:
+            match = [g for g in outlines if g[0] == fills[-1][0]]
+            if match:
+                outlines.remove(match[0])
+                outlines.insert(0, match[0])
+        parts = [tuple(g) for g in fills + outlines]
+
+    blocks: list[ColorBlock] = []
     here: Point = (0.0, 0.0)
-    for blk in blocks:
-        blk.runs = _order_runs(blk.runs, here)
-        here = blk.runs[-1].points[-1]
+    for color, runs, _ in parts:
+        ordered = _order_runs(runs, here)       # fills stay before outlines in a shared block
+        here = ordered[-1].points[-1]
+        if blocks and blocks[-1].color == color:
+            blocks[-1].runs.extend(ordered)
+        else:
+            blocks.append(ColorBlock(color, ordered))
     return blocks
 
 
@@ -202,7 +234,10 @@ def stitch_points(run: Run, s: Settings) -> list[Point]:
 
     Each tie is `lock_passes` back-and-forth stitches of up to `lock_len`
     along the first / last stitch, so they sit on the line being sewn."""
-    pts = resample(np.asarray(run.points), s.stitch_len, s.corner_deg, s.min_stitch)
+    if run.fill:
+        pts = list(run.points)
+    else:
+        pts = resample(np.asarray(run.points), s.stitch_len, s.corner_deg, s.min_stitch)
     if s.lock_len <= 0 or s.lock_passes <= 0 or len(pts) < 2:
         return pts
 

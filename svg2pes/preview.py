@@ -6,6 +6,7 @@ drawing works in millimetres, and a View maps millimetres to image pixels.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PIL import Image, ImageDraw
@@ -21,7 +22,7 @@ MARGIN = (200, 200, 214)
 JUMP_LINE = (200, 140, 140)
 GHOST = (214, 214, 210)         # not yet sewn, in the sew-out simulation
 NEEDLE_POINT = (55, 55, 55)
-THREAD_MM = 0.4                 # drawn thread thickness (40 wt embroidery thread)
+THREAD_MM = 0.45                # drawn thread thickness (40 wt thread, a little spread when sewn)
 
 # kinds of track entries
 SEW, JUMPED, TRIMMED, CHANGE = 1, 2, 3, 4
@@ -144,7 +145,7 @@ def draw_track(img: Image.Image, track: Track, view: View, start: int, end: int,
     d = ImageDraw.Draw(img)
     k, ox, oy = view.k, view.x0, view.y0
     real_k = k / view.ss
-    w = max(1, round(THREAD_MM * k))
+    w = max(1, math.ceil(THREAD_MM * k))     # round up, so 0.4 mm fill rows leave no gaps
     fancy = style.thread_look and real_k >= 7 and not ghost
     dots = style.needle_points and real_k >= 12 and not ghost
     r_dot = max(1.0, 0.09 * k)

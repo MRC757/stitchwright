@@ -25,6 +25,7 @@ from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, t
 from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
 from .stitching import Settings
 from .svg_import import Design, DesignObject, Polyline, load_svg
+from .fill import FillSpec, can_fill
 from .text import TextSpec, default_font, installed_fonts, text_polylines
 
 TITLE = "svg2pes – SVG to Brother PES"
@@ -308,6 +309,120 @@ class TextDialog(tk.Toplevel):
         return self.result
 
 
+class FillDialog(tk.Toplevel):
+    """Modal dialog for an object's fill. After wait(), .result is None (cancelled)
+    or (FillSpec or None for no fill, sew_outline: bool)."""
+
+    def __init__(self, parent, ui: float, title: str, spec: FillSpec | None, outline: bool,
+                 outline_rgb):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.resizable(False, False)
+        self.ui = ui
+        self.result = None
+        base = spec or FillSpec()
+        self.other_rgb = base.color or outline_rgb
+        self.v_on = tk.BooleanVar(value=True)
+        self.v_same = tk.BooleanVar(value=base.color is None)
+        self.v_angle = tk.StringVar(value=f"{base.angle:g}")
+        self.v_spacing = tk.StringVar(value=f"{base.spacing:g}")
+        self.v_len = tk.StringVar(value=f"{base.stitch_len:g}")
+        self.v_outline = tk.BooleanVar(value=outline)
+        self._img = None
+
+        f = ttk.Frame(self, padding=12)
+        f.pack(fill="both", expand=True)
+        ttk.Checkbutton(f, text="Fill the inside with stitches", variable=self.v_on,
+                        command=self._enable).grid(row=0, column=0, columnspan=3, sticky="w")
+        self.widgets = []
+        ttk.Label(f, text="Thread").grid(row=1, column=0, sticky="nw", pady=(8, 2))
+        tf = ttk.Frame(f)
+        tf.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 2))
+        r1 = ttk.Radiobutton(tf, text="Same as the outline", variable=self.v_same, value=True)
+        r1.pack(anchor="w")
+        of = ttk.Frame(tf)
+        of.pack(anchor="w", pady=(2, 0))
+        r2 = ttk.Radiobutton(of, text="Another thread:", variable=self.v_same, value=False)
+        r2.pack(side="left")
+        self.l_thread = ttk.Label(of, compound="left", padding=(6, 0))
+        self.l_thread.pack(side="left")
+        b = ttk.Button(of, text="Choose…", command=self._pick)
+        b.pack(side="left", padx=6)
+        self.widgets += [r1, r2, b]
+        grey = dict(foreground="#666666")
+        rows = (("Angle (°)", self.v_angle, "direction of the stitch rows; 45 is usual"),
+                ("Row spacing (mm)", self.v_spacing, "0.4 is typical; smaller is denser"),
+                ("Stitch length (mm)", self.v_len, "3–4 mm"))
+        for i, (label, var, hint) in enumerate(rows, start=2):
+            ttk.Label(f, text=label).grid(row=i, column=0, sticky="w", pady=2)
+            e = ttk.Entry(f, textvariable=var, width=7)
+            e.grid(row=i, column=1, sticky="w", pady=2)
+            ttk.Label(f, text=hint, **grey).grid(row=i, column=2, sticky="w", padx=6)
+            self.widgets.append(e)
+        ttk.Checkbutton(f, text="Also sew the outline (sewn on top of the fill)",
+                        variable=self.v_outline).grid(row=5, column=0, columnspan=3, sticky="w",
+                                                      pady=(8, 0))
+        self.info = ttk.Label(f, text="", foreground=ERROR_COLOUR)
+        self.info.grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        bf = ttk.Frame(f)
+        bf.grid(row=7, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(bf, text="OK", command=self._ok).pack(side="right", padx=6)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda e: self._ok())
+        self._show_thread()
+        _centre_on(self, parent)
+
+    def _show_thread(self):
+        t = thread_for_rgb(self.other_rgb)
+        self._img = swatch(self, [to_hex(self.other_rgb)], int(16 * self.ui))
+        self.l_thread.configure(image=self._img,
+                                text=f" {t.number} {t.name}" if t else f" {to_hex(self.other_rgb)}")
+
+    def _pick(self):
+        p = ThreadPicker(self, self.ui, "Fill thread", thread_for_rgb(self.other_rgb), None, 0)
+        res = p.wait()
+        self.grab_set()                      # the picker took the grab; take it back
+        if isinstance(res, Thread):
+            self.other_rgb = res.rgb
+            self.v_same.set(False)
+            self._show_thread()
+
+    def _enable(self):
+        state = "normal" if self.v_on.get() else "disabled"
+        for w in self.widgets:
+            w.configure(state=state)
+
+    def _ok(self):
+        if not self.v_on.get():
+            self.result = (None, self.v_outline.get())
+            self.destroy()
+            return
+        try:
+            angle = float(self.v_angle.get())
+            spacing = float(self.v_spacing.get())
+            length = float(self.v_len.get())
+        except ValueError:
+            self.info.configure(text="Angle, spacing and stitch length must be numbers.")
+            return
+        if not 0.2 <= spacing <= 3:
+            self.info.configure(text="Row spacing must be between 0.2 and 3 mm.")
+            return
+        if not 1 <= length <= 12:
+            self.info.configure(text="Stitch length must be between 1 and 12 mm.")
+            return
+        color = None if self.v_same.get() else self.other_rgb
+        self.result = (FillSpec(color, angle, spacing, length), self.v_outline.get())
+        self.destroy()
+
+    def wait(self):
+        self.grab_set()
+        self.focus_set()
+        self.wait_window()
+        return self.result
+
+
 # ------------------------------------------------------------------ main window
 class App:
     def __init__(self, root: tk.Tk, path: str | None = None):
@@ -322,6 +437,8 @@ class App:
         self.home: dict[str, Affine] = {}      # placement when first opened / added
         self.colours: dict[str, tuple[int, int, int]] = {}   # obj_id -> chosen thread rgb
         self.skipped: set[str] = set()
+        self.fills: dict[str, FillSpec] = {}         # obj_id -> fill settings
+        self.no_outline: set[str] = set()            # objects whose outline is not sewn
         self.warnings: list[str] = []
         self.placed: dict[str, list[list[tuple[float, float]]]] = {}
         self.plan: Plan | None = None
@@ -425,13 +542,13 @@ class App:
         # Objects -----------------------------------------------------------
         f_obj = ttk.LabelFrame(left, text=" Objects  (SVG colour → thread) ", padding=6)
         f_obj.pack(fill="both", expand=True)
-        cols = ("id", "kind", "thread", "sew")
+        cols = ("id", "kind", "thread", "fill", "sew")
         self.tree = ttk.Treeview(f_obj, columns=cols, show="tree headings", height=7,
                                  selectmode="extended")
         self.tree.heading("#0", text="#", anchor="w")
         self.tree.column("#0", width=int(88 * ui), stretch=False)
-        for c, text, w in (("id", "Object", 90), ("kind", "Shape", 120),
-                           ("thread", "Thread", 140), ("sew", "Sew", 40)):
+        for c, text, w in (("id", "Object", 64), ("kind", "Shape", 84),
+                           ("thread", "Outline", 118), ("fill", "Fill", 118), ("sew", "Sew", 36)):
             self.tree.heading(c, text=text, anchor="w")
             self.tree.column(c, width=int(w * ui), stretch=c == "kind")
         self.tree.tag_configure("skipped", foreground="#9e9e9e")
@@ -444,11 +561,13 @@ class App:
         btns = ttk.Frame(f_obj)
         btns.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Button(btns, text="Choose thread…", command=self.change_thread).pack(side="left")
+        ttk.Button(btns, text="Fill…", command=self.edit_fill).pack(side="left", padx=(6, 0))
         ttk.Button(btns, text="Sew / skip", command=self.toggle_skip).pack(side="left", padx=6)
         ttk.Button(btns, text="Delete text", command=self.delete_selected).pack(side="left")
         ttk.Button(btns, text="Reset all", command=self.reset_all).pack(side="left", padx=6)
         ttk.Label(f_obj, foreground="#666666",
-                  text="Double-click: choose thread (or edit text).  Space: sew/skip.") \
+                  text="Double-click: outline thread (or edit text); on the Fill column: fill.  "
+                       "Space: sew/skip.") \
             .grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.tree.bind("<Double-1>", self._on_double)
         self.tree.bind("<Return>", lambda e: self._edit_or_thread())
@@ -579,8 +698,7 @@ class App:
 
         under = ttk.Frame(right)
         under.pack(fill="x", pady=(6, 0))
-        self.l_info = ttk.Label(under, text="")
-        self.l_info.pack(side="left")
+        # controls are packed before the info text, so if space is short the text is cut, not them
         ttk.Checkbutton(under, text="Needle points", variable=self.v_dots).pack(side="right")
         ttk.Checkbutton(under, text="Show jumps", variable=self.v_jumps).pack(side="right", padx=8)
         ttk.Button(under, text="Fit", width=4, command=self.zoom_fit).pack(side="right", padx=(0, 8))
@@ -588,6 +706,8 @@ class App:
         self.l_zoom = ttk.Label(under, text="100%", width=6, anchor="center")
         self.l_zoom.pack(side="right")
         ttk.Button(under, text="−", width=3, command=lambda: self.zoom_step(1 / 1.5)).pack(side="right")
+        self.l_info = ttk.Label(under, text="")
+        self.l_info.pack(side="left", fill="x", expand=True)
 
         sim = ttk.Frame(right)
         sim.pack(fill="x", pady=(4, 0))
@@ -656,7 +776,10 @@ class App:
 
     def _on_double(self, event):
         if self.tree.identify_row(event.y):
-            self._edit_or_thread()
+            if self.tree.identify_column(event.x) == "#4":      # the Fill column
+                self.edit_fill()
+            else:
+                self._edit_or_thread()
 
     def _edit_or_thread(self):
         sel = self.selection()
@@ -668,11 +791,12 @@ class App:
     # ---------------------------------------------------------------- undo
     def _state(self):
         return (dict(self.mats), dict(self.home), dict(self.colours), set(self.skipped),
-                dict(self.texts), dict(self.text_objs), list(self.order_ids))
+                dict(self.texts), dict(self.text_objs), list(self.order_ids),
+                dict(self.fills), set(self.no_outline))
 
     def _restore(self, st):
         (self.mats, self.home, self.colours, self.skipped, self.texts, self.text_objs,
-         self.order_ids) = st
+         self.order_ids, self.fills, self.no_outline) = st
         self.fill_objects()
         self.refresh()
 
@@ -725,6 +849,8 @@ class App:
         self.text_objs.clear()
         self.texts.clear()
         self.colours.clear()
+        self.fills.clear()
+        self.no_outline.clear()
         self.skipped.clear()
         self.undo_stack.clear()
         self.redo_stack.clear()
@@ -793,14 +919,20 @@ class App:
             img = swatch(self.root, [to_hex(o.source_color), to_hex(rgb)], size)
             self._images.append(img)
             skipped = oid in self.skipped
+            outline = "(no outline)" if oid in self.no_outline else \
+                (f"{t.number}  {t.name}" if t else to_hex(rgb))
+            fill = "—"
+            if oid in self.fills:
+                frgb = self.fills[oid].color or rgb
+                ft = thread_for_rgb(frgb)
+                fill = f"{ft.number}  {ft.name}" if ft else to_hex(frgb)
             if oid in self.texts:
                 first = self.texts[oid].text.strip().split("\n")[0]
                 kind = f"Text “{first[:16]}{'…' if len(first) > 16 else ''}”"
             else:
                 kind = o.kind
             self.tree.insert("", "end", iid=oid, text=f" {o.index}", image=img,
-                             values=(oid, kind, f"{t.number}  {t.name}" if t else to_hex(rgb),
-                                     "skip" if skipped else "sew"),
+                             values=(oid, kind, outline, fill, "skip" if skipped else "sew"),
                              tags=("skipped",) if skipped else ())
         keep = [i for i in sel if self.tree.exists(i)]
         if keep:
@@ -872,9 +1004,10 @@ class App:
             return
         self.push_undo()
         for i in texts:
-            for d in (self.texts, self.text_objs, self.mats, self.home, self.colours):
+            for d in (self.texts, self.text_objs, self.mats, self.home, self.colours, self.fills):
                 d.pop(i, None)
             self.skipped.discard(i)
+            self.no_outline.discard(i)
             self.order_ids.remove(i)
         self.fill_objects()
         self.refresh()
@@ -885,9 +1018,41 @@ class App:
         self.push_undo()
         self.colours.clear()
         self.skipped.clear()
+        self.fills.clear()
+        self.no_outline.clear()
         self.mats = dict(self.home)
         self.fill_objects()
         self.refresh()
+
+    # ---------------------------------------------------------------- fill
+    def edit_fill(self):
+        sel = self._need_selection()
+        if not sel:
+            return
+        ok = [i for i in sel if can_fill(self.obj(i).polylines)]
+        if not ok:
+            self.set_status("Only closed shapes can be filled, and none of the selected "
+                            "objects is closed.", WARN_COLOUR)
+            return
+        first = ok[0]
+        title = f"Fill {first}" if len(ok) == 1 else f"Fill {len(ok)} objects"
+        res = FillDialog(self.root, self.ui, title, self.fills.get(first),
+                         first not in self.no_outline, self.chosen_rgb(self.obj(first))).wait()
+        if res is None:
+            return
+        spec, outline = res
+        self.push_undo()
+        for i in ok:
+            if spec is None:
+                self.fills.pop(i, None)
+            else:
+                self.fills[i] = spec
+            (self.no_outline.discard if outline else self.no_outline.add)(i)
+        self.fill_objects()
+        self.refresh()
+        left_out = [i for i in sel if i not in ok]
+        if left_out:
+            self.set_status(f"Not closed shapes, so not filled: {', '.join(left_out)}", WARN_COLOUR)
 
     # ---------------------------------------------------------------- text
     def add_text(self):
@@ -1270,7 +1435,9 @@ class App:
             self.placed[oid] = [pl.points for pl in polys]
             objs.append(DesignObject(o.index, oid, o.kind, o.source_color, polys,
                                      color=self.colours.get(oid, o.source_color),
-                                     skipped=oid in self.skipped))
+                                     skipped=oid in self.skipped,
+                                     fill=self.fills.get(oid),
+                                     outline=oid not in self.no_outline))
         design = Design(objs, list(self.warnings))
         try:
             self._read_hoop()
@@ -1296,8 +1463,8 @@ class App:
             return
         rep = plan.report
         self.l_info.configure(
-            text=f"{rep.width_mm:.1f} × {rep.height_mm:.1f} mm   ·   {rep.stitch_count} stitches"
-                 f"   ·   {rep.color_blocks} colour(s)   ·   {rep.jump_count} jumps")
+            text=f"{rep.width_mm:.1f} × {rep.height_mm:.1f} mm  ·  {rep.stitch_count} stitches"
+                 f"  ·  {rep.color_blocks} colours  ·  {rep.jump_count} jumps")
         if self.outside:
             self.b_save.configure(state="disabled")
             self.set_status(f"Outside the sewing area: {', '.join(self.outside)}. Drag it in, "
