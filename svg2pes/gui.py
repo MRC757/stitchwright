@@ -480,6 +480,9 @@ class App:
         self.svg_path: str | None = None
         self.svg_map: dict[str, DesignObject] = {}
         self.text_objs: dict[str, DesignObject] = {}
+        self.extra_objs: dict[str, DesignObject] = {}  # copies, imported stitches and images
+        self.groups: dict[str, str] = {}             # obj_id -> group id
+        self.clipboard: list[dict] = []
         self.texts: dict[str, TextSpec] = {}
         self.order_ids: list[str] = []
         self.mats: dict[str, Affine] = {}      # outline -> hoop placement, per object
@@ -617,7 +620,7 @@ class App:
         ttk.Button(btns, text="Choose thread…", command=self.change_thread).pack(side="left")
         ttk.Button(btns, text="Fill / outline…", command=self.edit_fill).pack(side="left", padx=(6, 0))
         ttk.Button(btns, text="Sew / skip", command=self.toggle_skip).pack(side="left", padx=6)
-        ttk.Button(btns, text="Delete text", command=self.delete_selected).pack(side="left")
+        ttk.Button(btns, text="Delete", command=self.delete_selected).pack(side="left")
         ttk.Button(btns, text="Reset all", command=self.reset_all).pack(side="left", padx=6)
         ttk.Label(f_obj, foreground="#666666",
                   text="Double-click: outline thread (or edit text); on the Fill column: fill.  "
@@ -671,12 +674,21 @@ class App:
         ttk.Button(af, text="Centre in hoop", command=self.centre_target).pack(side="left")
         ttk.Button(af, text="Fit to hoop", command=self.fit_target).pack(side="left", padx=6)
         ttk.Button(af, text="Reset", command=self.reset_target).pack(side="left")
+        gf = ttk.Frame(f_arr)
+        gf.grid(row=5, column=0, columnspan=4, sticky="w", pady=(2, 2))
+        ttk.Button(gf, text="Flip ↔", width=7, command=lambda: self.flip(True)).pack(side="left")
+        ttk.Button(gf, text="Flip ↕", width=7, command=lambda: self.flip(False)).pack(side="left", padx=(4, 8))
+        mb = ttk.Menubutton(gf, text="Align")
+        mb.pack(side="left")
+        mb["menu"] = self._align_menu(mb)
+        ttk.Button(gf, text="Group", command=self.group_selection).pack(side="left", padx=(8, 4))
+        ttk.Button(gf, text="Ungroup", command=self.ungroup_selection).pack(side="left")
         ttk.Label(f_arr, **grey, justify="left", text=(
             "In the preview: drag a box around objects to select them (Ctrl+A or\n"
             "Select all for everything, Esc for none). Drag the selection to move it;\n"
             "corner handles resize, the round handle rotates (Shift: 15° steps).\n"
             "Arrow keys nudge 1 mm (Shift: 0.1 mm).")) \
-            .grid(row=5, column=0, columnspan=4, sticky="w", pady=(4, 0))
+            .grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
         for e, fn in ((self.e_w, self.apply_size), (self.e_h, self.apply_size),
                       (self.e_x, self.apply_position), (self.e_y, self.apply_position)):
             e.bind("<Return>", lambda ev, fn=fn: fn())
@@ -799,7 +811,77 @@ class App:
         r.bind_all("<Control-y>", lambda e: self._main_key(e, self.redo, text_ok=False))
         r.bind_all("<Control-Z>", lambda e: self._main_key(e, self.redo, text_ok=False))
         r.bind_all("<Control-a>", lambda e: self._main_key(e, self.select_all, text_ok=False))
+        r.bind_all("<Control-c>", lambda e: self._main_key(e, self.copy_selection, text_ok=False))
+        r.bind_all("<Control-v>", lambda e: self._main_key(e, self.paste, text_ok=False))
+        r.bind_all("<Control-d>", lambda e: self._main_key(e, self.duplicate, text_ok=False))
+        r.bind_all("<Control-g>", lambda e: self._main_key(e, self.group_selection, text_ok=False))
+        r.bind_all("<Control-G>", lambda e: self._main_key(e, self.ungroup_selection, text_ok=False))
+        self._build_menu()
         r.bind_all("<Escape>", lambda e: self._main_key(e, self.select_none, text_ok=False))
+
+    def _align_menu(self, master) -> tk.Menu:
+        m = tk.Menu(master, tearoff=False)
+        for label, how in (("Left edges", "left"), ("Centres (across)", "hcentre"),
+                           ("Right edges", "right"), (None, None), ("Top edges", "top"),
+                           ("Middles (up and down)", "vcentre"), ("Bottom edges", "bottom")):
+            if label is None:
+                m.add_separator()
+            else:
+                m.add_command(label=label, command=lambda h=how: self.align(h))
+        m.add_separator()
+        m.add_command(label="Space evenly across", command=lambda: self.distribute(True))
+        m.add_command(label="Space evenly up and down", command=lambda: self.distribute(False))
+        return m
+
+    def _build_menu(self):
+        """The menu bar. Commands still to come are added by later sections."""
+        bar = tk.Menu(self.root)
+        self.m_file = tk.Menu(bar, tearoff=False)
+        self.m_file.add_command(label="Open SVG…", accelerator="Ctrl+O", command=self.ask_open)
+        self.m_file.add_command(label="Add text…", accelerator="Ctrl+T", command=self.add_text)
+        self.m_file.add_separator()
+        self.m_file.add_command(label="Save PES…", accelerator="Ctrl+S", command=self.save)
+        self.m_file.add_separator()
+        self.m_file.add_command(label="Exit", command=self.root.destroy)
+        bar.add_cascade(label="File", menu=self.m_file)
+        m = tk.Menu(bar, tearoff=False)
+        m.add_command(label="Undo", accelerator="Ctrl+Z", command=self.undo)
+        m.add_command(label="Redo", accelerator="Ctrl+Y", command=self.redo)
+        m.add_separator()
+        m.add_command(label="Copy", accelerator="Ctrl+C", command=self.copy_selection)
+        m.add_command(label="Paste", accelerator="Ctrl+V", command=self.paste)
+        m.add_command(label="Duplicate", accelerator="Ctrl+D", command=self.duplicate)
+        m.add_command(label="Delete", accelerator="Del", command=self.delete_selected)
+        m.add_separator()
+        m.add_command(label="Select all", accelerator="Ctrl+A", command=self.select_all)
+        m.add_command(label="Select none", accelerator="Esc", command=self.select_none)
+        bar.add_cascade(label="Edit", menu=m)
+        m = tk.Menu(bar, tearoff=False)
+        m.add_command(label="Group", accelerator="Ctrl+G", command=self.group_selection)
+        m.add_command(label="Ungroup", accelerator="Ctrl+Shift+G", command=self.ungroup_selection)
+        m.add_separator()
+        m.add_command(label="Flip left-right", command=lambda: self.flip(True))
+        m.add_command(label="Flip up-down", command=lambda: self.flip(False))
+        m.add_command(label="Rotate 90° left", command=lambda: self.rotate_by(-90))
+        m.add_command(label="Rotate 90° right", command=lambda: self.rotate_by(90))
+        m.add_separator()
+        m.add_cascade(label="Align", menu=self._align_menu(m))
+        m.add_separator()
+        m.add_command(label="Centre in hoop", command=self.centre_target)
+        m.add_command(label="Fit to hoop", command=self.fit_target)
+        m.add_separator()
+        m.add_command(label="Fill / outline…", command=self.edit_fill)
+        m.add_command(label="Choose thread…", command=self.change_thread)
+        bar.add_cascade(label="Arrange", menu=m)
+        self.m_view = tk.Menu(bar, tearoff=False)
+        self.m_view.add_command(label="Zoom in", accelerator="+", command=lambda: self.zoom_step(1.5))
+        self.m_view.add_command(label="Zoom out", accelerator="-", command=lambda: self.zoom_step(1 / 1.5))
+        self.m_view.add_command(label="Fit hoop", accelerator="0", command=self.zoom_fit)
+        self.m_view.add_separator()
+        self.m_view.add_command(label="Sew-out: play / pause", command=self.sim_toggle)
+        bar.add_cascade(label="View", menu=self.m_view)
+        self.root.configure(menu=bar)
+        self.menubar = bar
 
     def _main_key(self, event, fn, text_ok: bool = True):
         """Run a shortcut only in the main window, and (unless text_ok) not while
@@ -818,7 +900,8 @@ class App:
         self.l_status.configure(foreground=colour)
 
     def obj(self, obj_id: str) -> DesignObject:
-        return self.text_objs.get(obj_id) or self.svg_map[obj_id]
+        return (self.text_objs.get(obj_id) or self.extra_objs.get(obj_id)
+                or self.svg_map[obj_id])
 
     def chosen_rgb(self, o: DesignObject):
         return self.colours.get(o.obj_id) or nearest_brother(o.source_color).rgb
@@ -859,11 +942,13 @@ class App:
     def _state(self):
         return (dict(self.mats), dict(self.home), dict(self.colours), set(self.skipped),
                 dict(self.texts), dict(self.text_objs), list(self.order_ids),
-                dict(self.fills), set(self.no_outline), dict(self.satins), list(self.color_order))
+                dict(self.fills), set(self.no_outline), dict(self.satins), list(self.color_order),
+                dict(self.extra_objs), dict(self.groups))
 
     def _restore(self, st):
         (self.mats, self.home, self.colours, self.skipped, self.texts, self.text_objs,
-         self.order_ids, self.fills, self.no_outline, self.satins, self.color_order) = st
+         self.order_ids, self.fills, self.no_outline, self.satins, self.color_order,
+         self.extra_objs, self.groups) = st
         self.fill_objects()
         self.refresh()
 
@@ -914,6 +999,8 @@ class App:
         self.svg_path = path
         self.svg_map = {o.obj_id: o for o in design.objects}
         self.text_objs.clear()
+        self.extra_objs.clear()
+        self.groups.clear()
         self.texts.clear()
         self.colours.clear()
         self.fills.clear()
@@ -1002,6 +1089,8 @@ class App:
                 kind = f"Text “{first[:16]}{'…' if len(first) > 16 else ''}”"
             else:
                 kind = o.kind
+            if oid in self.groups:
+                kind += f"  [{self.groups[oid]}]"
             self.tree.insert("", "end", iid=oid, text=f" {o.index}", image=img,
                              values=(oid, kind, outline, fill, "skip" if skipped else "sew"),
                              tags=("skipped",) if skipped else ())
@@ -1064,24 +1153,191 @@ class App:
         self.fill_objects()
         self.refresh()
 
+    def _forget(self, i: str):
+        for d in (self.texts, self.text_objs, self.extra_objs, self.mats, self.home,
+                  self.colours, self.fills, self.satins, self.groups):
+            d.pop(i, None)
+        self.skipped.discard(i)
+        self.no_outline.discard(i)
+        if i in self.order_ids:
+            self.order_ids.remove(i)
+
     def delete_selected(self):
         sel = self._need_selection()
         if not sel:
             return
-        texts = [i for i in sel if i in self.texts]
-        if not texts:
-            self.set_status("Only added text can be deleted. Use Sew / skip to leave SVG "
-                            "objects out.", WARN_COLOUR)
+        self.push_undo()
+        for i in sel:
+            self._forget(i)
+        self.fill_objects()
+        self.refresh()
+        self.set_status(f"Deleted {len(sel)} object(s). Undo (Ctrl+Z) brings them back.")
+
+    # ---------------------------------------------------------------- copy / paste
+    def _snapshot(self, i: str) -> dict:
+        return {"obj": self.obj(i), "mat": self.mats[i], "colour": self.colours.get(i),
+                "skipped": i in self.skipped, "fill": self.fills.get(i),
+                "no_outline": i in self.no_outline, "satin": self.satins.get(i),
+                "text": self.texts.get(i), "group": self.groups.get(i)}
+
+    def _new_id(self, base: str) -> str:
+        base = base.split("_copy")[0]
+        n = 1
+        while f"{base}_copy{n}" in self.mats or f"{base}_copy{n}" in self.svg_map:
+            n += 1
+        return f"{base}_copy{n}"
+
+    def copy_selection(self):
+        sel = self._need_selection()
+        if sel:
+            self.clipboard = [self._snapshot(i) for i in sel]
+            self.set_status(f"Copied {len(sel)} object(s). Paste with Ctrl+V.")
+
+    def paste(self, offset: float = 5.0):
+        if not self.clipboard:
+            self.set_status("Nothing to paste: copy objects first (Ctrl+C).", WARN_COLOUR)
             return
         self.push_undo()
-        for i in texts:
-            for d in (self.texts, self.text_objs, self.mats, self.home, self.colours, self.fills,
-                      self.satins):
-                d.pop(i, None)
-            self.skipped.discard(i)
-            self.no_outline.discard(i)
-            self.order_ids.remove(i)
+        index = max([self.obj(i).index for i in self.order_ids], default=0)
+        new_groups: dict[str, str] = {}
+        new_ids = []
+        for snap in self.clipboard:
+            o = snap["obj"]
+            nid = self._new_id(o.obj_id)
+            index += 1
+            copy = replace(o, index=index, obj_id=nid)
+            if snap["text"] is not None:
+                self.text_objs[nid] = copy
+                self.texts[nid] = snap["text"]
+            else:
+                self.extra_objs[nid] = copy
+            self.order_ids.append(nid)
+            self.mats[nid] = chain(snap["mat"], translate(offset, offset))
+            self.home[nid] = self.mats[nid]
+            for key, store in (("colour", self.colours), ("fill", self.fills),
+                               ("satin", self.satins)):
+                if snap[key] is not None:
+                    store[nid] = snap[key]
+            if snap["skipped"]:
+                self.skipped.add(nid)
+            if snap["no_outline"]:
+                self.no_outline.add(nid)
+            if snap["group"]:
+                if snap["group"] not in new_groups:          # copies form a group of their own
+                    new_groups[snap["group"]] = self._new_group_id()
+                self.groups[nid] = new_groups[snap["group"]]
+            new_ids.append(nid)
         self.fill_objects()
+        self.tree.selection_set(new_ids)
+        self.refresh()
+        self.set_status(f"Pasted {len(new_ids)} object(s), 5 mm down and right. Drag them into place.")
+
+    def duplicate(self):
+        sel = self._need_selection()
+        if sel:
+            saved = self.clipboard
+            self.clipboard = [self._snapshot(i) for i in sel]
+            self.paste()
+            self.clipboard = saved
+
+    # ---------------------------------------------------------------- groups
+    def _new_group_id(self) -> str:
+        n = 1
+        while f"group {n}" in self.groups.values():
+            n += 1
+        return f"group {n}"
+
+    def expand_groups(self, ids) -> list[str]:
+        """ids plus every other member of their groups."""
+        gids = {self.groups[i] for i in ids if i in self.groups}
+        extra = [i for i in self.order_ids if self.groups.get(i) in gids and i not in ids]
+        return list(ids) + extra
+
+    def group_selection(self):
+        sel = self._need_selection()
+        if len(sel) < 2:
+            if sel:
+                self.set_status("Select two or more objects to group them.", WARN_COLOUR)
+            return
+        self.push_undo()
+        gid = self._new_group_id()
+        for i in sel:
+            self.groups[i] = gid
+        self.fill_objects()
+        self.set_status(f"Grouped {len(sel)} objects as {gid}: clicking one selects them all.")
+
+    def ungroup_selection(self):
+        sel = [i for i in self._need_selection() if i in self.groups]
+        if not sel:
+            return
+        self.push_undo()
+        for i in sel:
+            del self.groups[i]
+        self.fill_objects()
+        self.set_status(f"Ungrouped {len(sel)} object(s).")
+
+    # ---------------------------------------------------------------- flip / align
+    def flip(self, horizontal: bool):
+        b = self.target_bounds()
+        if b:
+            cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+            self.apply_transform(scale(-1, 1, cx, cy) if horizontal else scale(1, -1, cx, cy))
+
+    def _units(self, ids) -> list[list[str]]:
+        """Objects to move together: each group is one unit, other objects on their own."""
+        units, seen = [], {}
+        for i in ids:
+            g = self.groups.get(i)
+            if g is None:
+                units.append([i])
+            elif g in seen:
+                seen[g].append(i)
+            else:
+                seen[g] = [i]
+                units.append(seen[g])
+        return units
+
+    def align(self, how: str):
+        sel = self._need_selection()
+        if not sel:
+            return
+        units = self._units(sel)
+        if len(units) == 1:          # one object (or group): align it to the sewing area
+            hw, hh = self.hoop[0] / 2 - self.margin, self.hoop[1] / 2 - self.margin
+            ref = (-hw, -hh, hw, hh)
+        else:
+            ref = self.target_bounds(sel)
+        self.push_undo()
+        for u in units:
+            b = self.target_bounds(u)
+            dx = {"left": ref[0] - b[0], "right": ref[2] - b[2],
+                  "hcentre": (ref[0] + ref[2]) / 2 - (b[0] + b[2]) / 2}.get(how, 0.0)
+            dy = {"top": ref[1] - b[1], "bottom": ref[3] - b[3],
+                  "vcentre": (ref[1] + ref[3]) / 2 - (b[1] + b[3]) / 2}.get(how, 0.0)
+            for i in u:
+                self.mats[i] = chain(self.mats[i], translate(dx, dy))
+        self.refresh()
+
+    def distribute(self, horizontal: bool):
+        sel = self._need_selection()
+        units = self._units(sel)
+        if len(units) < 3:
+            if sel:
+                self.set_status("Select three or more objects (or groups) to space them evenly.",
+                                WARN_COLOUR)
+            return
+        k = 0 if horizontal else 1
+        boxes = sorted(((self.target_bounds(u), u) for u in units), key=lambda bu: bu[0][k])
+        first, last = boxes[0][0], boxes[-1][0]
+        total = sum(b[k + 2] - b[k] for b, _ in boxes)
+        gap = ((last[k + 2] - first[k]) - total) / (len(boxes) - 1)
+        self.push_undo()
+        pos = first[k]
+        for b, u in boxes:
+            shift = pos - b[k]
+            for i in u:
+                self.mats[i] = chain(self.mats[i], translate(shift, 0) if horizontal else translate(0, shift))
+            pos += (b[k + 2] - b[k]) + gap
         self.refresh()
 
     def reset_all(self):
@@ -1402,7 +1658,7 @@ class App:
                     self.tree.selection_toggle(hit)
                     return
                 if hit not in self.tree.selection():
-                    self.tree.selection_set(hit)
+                    self.tree.selection_set(self.expand_groups([hit]))
                 mode = "move"
             else:
                 # Empty space, or inside a shape: dragging draws a selection box,
@@ -1456,7 +1712,7 @@ class App:
             self.canvas.delete("box")
             if d["moved"]:
                 caught = self.objects_in_box(d["start"], (e.x, e.y))
-                chosen = list(dict.fromkeys(d["base"] + caught))
+                chosen = self.expand_groups(list(dict.fromkeys(d["base"] + caught)))
                 self.tree.selection_set(chosen) if chosen else \
                     self.tree.selection_remove(self.tree.selection())
                 self.set_status(f"Selected {len(chosen)} object(s)." if chosen else
@@ -1466,7 +1722,7 @@ class App:
                 if d["additive"]:
                     self.tree.selection_toggle(d["hit"])
                 else:
-                    self.tree.selection_set(d["hit"])
+                    self.tree.selection_set(self.expand_groups([d["hit"]]))
             elif not d["additive"]:
                 self.tree.selection_remove(self.tree.selection())
             return
