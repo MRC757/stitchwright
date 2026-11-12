@@ -1,6 +1,10 @@
-pyembroidery>=1.5
-svgelements>=1.9
-Pillow>=10
-numpy>=1.24
-fonttools>=4.40
-Hershey-Fonts>=2.1
+# The exact versions stitchwright.exe is built and tested with (build_exe.ps1 installs
+# these), so two builds of one release are the same. They need Python 3.12 or later.
+# pyproject.toml lists the range of versions Stitchwright supports (Python 3.10 and up):
+# `pip install -e .` installs the newest of those instead.
+pyembroidery==1.5.1
+svgelements==1.9.6
+Pillow==13.0.0
+numpy==2.5.4
+fonttools==4.68.0
+Hershey-Fonts==2.1.0

@@ -85,8 +85,11 @@ macOS.
     stitchwright --help              # the command line
 
 For working on the code, install it editable with the test tools:
-`pip install -e ".[dev]"`. Running from the folder without installing also works:
-`pip install -r requirements.txt`, then `python -m stitchwright gui`.
+`pip install -e ".[dev]"`; that gets the newest supported versions of the libraries it uses.
+Running from the folder without installing also works: `pip install -r requirements.txt`,
+then `python -m stitchwright gui`. `requirements.txt` holds the exact library versions the
+Windows app is built with, which need Python 3.12 or later; on Python 3.10 or 3.11, use
+`pip install -e .` instead.
 
 ## Using the window
 

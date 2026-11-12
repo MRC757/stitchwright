@@ -18,7 +18,8 @@ if (-not (Test-Path ".venv-build\Scripts\python.exe")) {
 $py = ".venv-build\Scripts\python.exe"
 
 Write-Host "Installing requirements and PyInstaller..."
-& $py -m pip install --quiet --disable-pip-version-check -r requirements.txt pyinstaller pytest pyflakes
+# requirements.txt and the PyInstaller version are pinned so every build of a release is the same
+& $py -m pip install --quiet --disable-pip-version-check -r requirements.txt pyinstaller==6.22.3 pytest pyflakes
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 Write-Host "Running tests..."
