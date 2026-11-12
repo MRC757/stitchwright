@@ -22,6 +22,7 @@ underlay, for smooth borders.
 """
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass
 
@@ -349,9 +350,9 @@ class _Line:
 
     def at(self, s: float) -> Point:
         s = max(0.0, min(self.total, s))
-        i = 0
-        while i < len(self.seg) - 1 and self.cum[i + 1] < s:
-            i += 1
+        # the first segment ending at or after s (a bisection: satin calls this for
+        # every needle point, and walking from the start made long columns slow)
+        i = min(bisect.bisect_left(self.cum, s, 1) - 1, len(self.seg) - 1)
         t = 0.0 if self.seg[i] == 0 else (s - self.cum[i]) / self.seg[i]
         a, b = self.pts[i], self.pts[i + 1]
         return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)

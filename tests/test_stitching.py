@@ -43,6 +43,29 @@ def test_tie_stitches_lock_both_ends():
 # --- fill stitching -------------------------------------------------------------
 
 
+def _walk_at(line, s):
+    """The original, walk-from-the-start version of _Line.at, as a reference."""
+    s = max(0.0, min(line.total, s))
+    i = 0
+    while i < len(line.seg) - 1 and line.cum[i + 1] < s:
+        i += 1
+    t = 0.0 if line.seg[i] == 0 else (s - line.cum[i]) / line.seg[i]
+    a, b = line.pts[i], line.pts[i + 1]
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+
+def test_satin_is_unchanged_by_the_faster_point_lookup(monkeypatch):
+    from stitchwright import fill
+    pts = [(i * 0.5, 4 * math.sin(i * 0.2)) for i in range(120)]
+    pts[30:30] = [pts[30]]                                    # a zero-length segment
+    line = fill._Line(pts)
+    for s in [-1, 0, line.cum[1], line.cum[30], line.cum[31], line.total / 3, line.total, 1e9]:
+        assert line.at(s) == _walk_at(line, s)
+    fast = fill.satin_path(pts, False, fill.SatinSpec())
+    monkeypatch.setattr(fill._Line, "at", _walk_at)
+    assert fast == fill.satin_path(pts, False, fill.SatinSpec())
+
+
 def test_fill_covers_a_rectangle_with_rows():
     from stitchwright.fill import FillSpec, fill_paths
     paths = fill_paths([square(0, 0, 20, 10)], FillSpec(angle=0, spacing=0.5, stitch_len=3.5,
