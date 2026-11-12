@@ -24,6 +24,7 @@ class Settings:
     stitch_len: float = 2.5     # mm between needle drops on a run stitch
     tolerance: float = 0.05     # mm, outline simplification tolerance
     corner_deg: float = 35.0    # turns sharper than this always get a needle drop
+    curve_turn_deg: float = 11.0  # on curves, each stitch turns at most this (0 = even)
     trim_dist: float = 8.0      # mm, jumps longer than this are trimmed
     min_stitch: float = 0.4     # mm, shorter needle drops are merged (avoids thread breaks)
     lock_len: float = 0.5       # mm, tie-in / tie-off stitch length (0 = off)
@@ -62,9 +63,10 @@ class ColorBlock:
 
 
 def resample(points: np.ndarray, spacing: float, corner_deg: float,
-             min_len: float = 0.0) -> list[Point]:
-    """Place needle drops at roughly even spacing, keeping sharp corners, and
-    never closer together than min_len."""
+             min_len: float = 0.0, curve_turn_deg: float = 11.0) -> list[Point]:
+    """Place needle drops along a line: spacing apart on straight runs, closer on
+    curves (each stitch turning at most curve_turn_deg; 0 = even spacing), always
+    on sharp corners, and never closer together than min_len."""
     n = len(points)
     anchors = [0]
     for i in range(1, n - 1):
@@ -87,12 +89,47 @@ def resample(points: np.ndarray, spacing: float, corner_deg: float,
         total = cum[-1]
         if total < 1e-9:
             continue
-        k = max(1, math.ceil(total / spacing))
-        targets = np.linspace(total / k, total, k)
+        targets = _curve_targets(seg, d, cum, spacing, curve_turn_deg,
+                                 max(2 * min_len, CURVE_MIN_STITCH))
         xs = np.interp(targets, cum, seg[:, 0])
         ys = np.interp(targets, cum, seg[:, 1])
         out.extend(zip(xs.tolist(), ys.tolist()))
     return drop_close(out, min_len)
+
+
+CURVE_MIN_STITCH = 1.0      # mm, the shortest stitch used on tight curves
+
+
+def _curve_targets(seg, d, cum, spacing: float, turn_deg: float, shortest: float):
+    """Distances along one corner-to-corner span where needle points go: stitch_len
+    apart on straight runs, shorter where the line curves (so each stitch turns at
+    most turn_deg), never below `shortest`. The steps are then stretched slightly so
+    the last one lands exactly on the span's end. A straight span gets exactly the
+    old even spacing."""
+    total = float(cum[-1])
+    n = len(seg)
+    # curvature (degrees per mm) at each vertex: its turn over the length around it
+    kappa = np.zeros(n)
+    for i in range(1, n - 1):
+        v1, v2 = seg[i] - seg[i - 1], seg[i + 1] - seg[i]
+        l1, l2 = d[i - 1], d[i]
+        if l1 < 1e-9 or l2 < 1e-9:
+            continue
+        c = float(np.dot(v1, v2) / (l1 * l2))
+        kappa[i] = math.degrees(math.acos(max(-1.0, min(1.0, c)))) / ((l1 + l2) / 2)
+    if n > 2:
+        kappa[0], kappa[-1] = kappa[1], kappa[-2]
+    if turn_deg <= 0 or not kappa.any():
+        k = max(1, math.ceil(total / spacing))
+        return np.linspace(total / k, total, k)
+    steps, s = [], 0.0
+    while s < total - 1e-9:
+        kv = float(np.interp(s, cum, kappa))
+        step = spacing if kv <= 1e-9 else min(spacing, max(shortest, turn_deg / kv))
+        steps.append(step)
+        s += step
+    steps = np.array(steps) * (total / s)                   # land exactly on the end
+    return np.cumsum(steps)
 
 
 def _path_length(pts: list[Point]) -> float:
@@ -266,7 +303,8 @@ def stitch_points(run: Run, s: Settings) -> list[Point]:
     if run.prestitched:
         pts = list(run.points)
     else:
-        pts = resample(np.asarray(run.points), s.stitch_len, s.corner_deg, s.min_stitch)
+        pts = resample(np.asarray(run.points), s.stitch_len, s.corner_deg, s.min_stitch,
+                       s.curve_turn_deg)
     if s.lock_len <= 0 or s.lock_passes <= 0 or len(pts) < 2:
         return pts
 

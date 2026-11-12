@@ -204,3 +204,17 @@ def test_render_view_zoomed_and_partly_sewn():
     zoomed = render_view(t, View(-30, -20, 80, 800, 800), (100, 100), style=Style())
     assert zoomed.size == (800, 800)
     assert BACKGROUND in {c for _, c in zoomed.getcolors(1 << 20)}
+
+
+def test_curves_get_shorter_stitches_straight_runs_do_not():
+    import numpy as np
+    from svg2pes.geometry import simplify
+    # a 12 mm circle, sampled and simplified the way SVG outlines are
+    circle = [(6 * math.cos(t), 6 * math.sin(t)) for t in np.linspace(0, 2 * math.pi, 95)]
+    pts = resample(np.array(simplify(circle, 0.05)), 2.5, 35, 0.4)
+    assert len(pts) - 1 >= 30                                   # was 16 with even spacing
+    assert min(math.dist(a, b) for a, b in zip(pts, pts[1:])) >= 1.0 - 1e-6
+    line = resample(np.array([(0, 0), (50, 0)], float), 2.5, 35, 0.4)
+    assert len(line) - 1 == 20                                  # unchanged
+    even = resample(np.array(simplify(circle, 0.05)), 2.5, 35, 0.4, curve_turn_deg=0)
+    assert len(even) - 1 < 20                                   # 0 turns the feature off
