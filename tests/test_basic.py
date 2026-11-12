@@ -669,3 +669,37 @@ def test_illustrator_72dpi_exports_are_spotted_and_scaled(tmp_path):
     rep = convert(str(p), str(tmp_path / "o.pes"), svg_dpi=72)
     assert rep.width_mm == pytest.approx(50.8, abs=0.2)          # 2 inches
     assert load_svg(SAMPLE).dpi_hint is None                     # sized in mm: fine
+
+
+# --- hoop check from the planned stitches ---------------------------------------------
+
+def test_satin_reaching_past_the_margin_is_flagged():
+    from svg2pes.convert import outside_hoop
+    from svg2pes.fill import SatinSpec
+    from svg2pes.svg_import import Design, DesignObject
+    # 100 mm hoop, 2 mm margin: the sewing area ends at +-48 mm; the outline sits 1 mm inside
+    def rect(satin):
+        return DesignObject(1, "r", "Rect", (0, 0, 0), [_square(-47, -30, 47, 30)],
+                            color=(0, 0, 0), satin=satin)
+    run = Design([rect(None)], [])
+    sat = Design([rect(SatinSpec(width=2.0))], [])
+    plan_run = plan_design(run, placed=True)
+    plan_sat = plan_design(sat, placed=True)
+    assert outside_hoop(run, (100, 100), 2, plan_run.report) == []
+    assert outside_hoop(sat, (100, 100), 2) == []                     # the outline alone fits
+    assert outside_hoop(sat, (100, 100), 2, plan_sat.report) == ["r"]  # the satin doesn't
+    assert plan_sat.report.object_bounds["r"][2] == pytest.approx(48.1, abs=0.01)
+
+
+def test_cli_path_refuses_or_shrinks_stitches_past_the_area(tmp_path):
+    p = tmp_path / "wide.svg"
+    p.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="96mm" height="40mm" '
+                 'viewBox="0 0 96 40"><rect id="b" x="0" y="0" width="96" height="40" '
+                 'fill="none" stroke="#000"/></svg>')
+    out = str(tmp_path / "o.pes")
+    assert convert(str(p), out).width_mm == pytest.approx(96, abs=0.15)    # run stitch fits
+    with pytest.raises(ConversionError, match="stitches reach"):
+        convert(str(p), out, satins={"b": 3.0})
+    rep = convert(str(p), out, satins={"b": 3.0}, fit=True)
+    assert rep.width_mm <= 96.1
+    assert rep.bounds_mm[2] - rep.bounds_mm[0] <= 96.1

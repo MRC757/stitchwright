@@ -644,6 +644,7 @@ class App:
         self.placed: dict[str, list[list[tuple[float, float]]]] = {}
         self.plan: Plan | None = None
         self.outside: list[str] = []
+        self.outside_stitches_only: list[str] = []
         self.hoop = (100.0, 100.0)
         self.margin = 2.0
         self.last_text: TextSpec | None = None
@@ -2043,7 +2044,15 @@ class App:
             return
         x0, y0, x1, y1 = b
         aw, ah = self.hoop[0] - 2 * self.margin, self.hoop[1] - 2 * self.margin
-        limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 1e-6]
+        # leave room for stitches that reach past the outlines (satin, fill pull)
+        if self.plan is not None:
+            reach = [self.plan.report.object_bounds.get(i) for i in self.target()]
+            reach = [r for r in reach if r]
+            if reach:
+                ex = max(x0 - min(r[0] for r in reach), 0) + max(max(r[2] for r in reach) - x1, 0)
+                ey = max(y0 - min(r[1] for r in reach), 0) + max(max(r[3] for r in reach) - y1, 0)
+                aw, ah = aw - ex - 0.1, ah - ey - 0.1
+        limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 1e-6 and a > 0]
         if not limits:
             return
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
@@ -2298,7 +2307,10 @@ class App:
         self.plan = plan
         self.track = Track(plan.pattern) if plan else Track()
         self.sim_reset()
-        self.outside = outside_hoop(design, self.hoop, self.margin) if plan else []
+        self.outside = outside_hoop(design, self.hoop, self.margin, plan.report) if plan else []
+        # objects whose outline fits but whose satin / fill edge doesn't
+        self.outside_stitches_only = [i for i in self.outside if i not in
+                                      outside_hoop(design, self.hoop, self.margin)]
         self.fill_order()
         self.update_arrange_fields()
         self.draw_preview()
@@ -2314,8 +2326,14 @@ class App:
                  f"  ·  {rep.color_blocks} colours  ·  about {format_minutes(rep.total_minutes)}")
         if self.outside:
             self.b_save.configure(state="disabled")
-            self.set_status(f"Outside the sewing area: {', '.join(self.outside)}. Drag it in, "
-                            "or use Arrange → Fit to hoop.", ERROR_COLOUR)
+            names = ", ".join(self.outside)
+            if self.outside_stitches_only == self.outside:
+                msg = (f"The stitches of {names} reach outside the sewing area (a satin "
+                       f"column or fill edge goes a little past the outline). Move it in, "
+                       f"or use Arrange → Fit to hoop.")
+            else:
+                msg = f"Outside the sewing area: {names}. Drag it in, or use Arrange → Fit to hoop."
+            self.set_status(msg, ERROR_COLOUR)
             return
         self.b_save.configure(state="normal")
         warnings = sorted(set(rep.warnings))

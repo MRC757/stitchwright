@@ -49,6 +49,8 @@ class Report:
     warnings: list[str] = field(default_factory=list)
     sew_minutes: float = 0.0      # estimated time the machine spends sewing
     change_minutes: float = 0.0   # estimated time for thread changes
+    bounds_mm: tuple = (0.0, 0.0, 0.0, 0.0)          # where the stitches reach (mm)
+    object_bounds: dict = field(default_factory=dict)  # obj_id -> stitch extent (mm)
 
     @property
     def total_minutes(self) -> float:
@@ -238,7 +240,8 @@ def plan_design(design: Design, *,
                 fills: dict[str, str | None] | None = None,
                 no_outline: list[str] | None = None,
                 fill_spec: FillSpec | None = None,
-                satins: dict[str, float] | None = None) -> Plan:
+                satins: dict[str, float] | None = None,
+                _attempt: int = 0) -> Plan:
     """Turn a loaded design into stitches without writing anything.
     The design passed in is not modified.
 
@@ -248,6 +251,7 @@ def plan_design(design: Design, *,
     with outside_hoop()."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
+    original = design
     design = copy.deepcopy(design)
     apply_color_choices(design, overrides, color_map, skip, fills, no_outline, fill_spec, satins)
     if not design.active():
@@ -307,8 +311,50 @@ def plan_design(design: Design, *,
     sew_min, change_min = estimate_minutes(stitches, jumps, len(blocks) - 1, s.machine_spm)
     report = Report("", stitches, jumps, trims, len(blocks),
                     (bx1 - bx0) / 10.0, (by1 - by0) / 10.0, scale, tmap, warnings,
-                    sew_min, change_min)
+                    sew_min, change_min, (bx0 / 10.0, by0 / 10.0, bx1 / 10.0, by1 / 10.0),
+                    _object_bounds(blocks))
+
+    if not placed and _stitches_outside(report.bounds_mm, hoop_mm, margin_mm):
+        # Satin width and pull compensation reach past the outlines the sizing used.
+        if fit and _attempt < 3:
+            sw, sh = bx1 - bx0, by1 - by0
+            aw, ah = (hoop_mm[0] - 2 * margin_mm) * 10, (hoop_mm[1] - 2 * margin_mm) * 10
+            r = min(aw / sw if sw else 1.0, ah / sh if sh else 1.0) * 0.995
+            return plan_design(original, overrides=overrides, color_map=color_map, skip=skip,
+                               width_mm=w * scale * r, fit=True, hoop_mm=hoop_mm,
+                               margin_mm=margin_mm, settings=settings, snap=snap,
+                               fills=fills, no_outline=no_outline, fill_spec=fill_spec,
+                               satins=satins, _attempt=_attempt + 1)
+        x0, y0, x1, y1 = report.bounds_mm
+        raise ConversionError(
+            f"The stitches reach {x1 - x0:.1f} x {y1 - y0:.1f} mm (satin and fill edges go a "
+            f"little past the outlines), more than the usable area of "
+            f"{hoop_mm[0] - 2 * margin_mm:.0f} x {hoop_mm[1] - 2 * margin_mm:.0f} mm. "
+            f"Turn on shrink-to-fit (--fit) or set a smaller width (--width).")
     return Plan(pattern, report)
+
+
+STITCH_TOLERANCE_MM = 0.1      # needle positions are stored to the nearest 0.1 mm
+
+
+def _object_bounds(blocks) -> dict:
+    """Each object's stitch extent (mm), from its planned runs: includes satin width,
+    pull compensation and tie stitches, which the outline alone does not."""
+    out: dict[str, list[float]] = {}
+    for blk in blocks:
+        for run in blk.runs:
+            xs = [p[0] for p in run.points]
+            ys = [p[1] for p in run.points]
+            b = out.setdefault(run.object_id, [min(xs), min(ys), max(xs), max(ys)])
+            b[0], b[1] = min(b[0], min(xs)), min(b[1], min(ys))
+            b[2], b[3] = max(b[2], max(xs)), max(b[3], max(ys))
+    return {k: tuple(float(v) for v in b) for k, b in out.items()}
+
+
+def _stitches_outside(b, hoop_mm, margin_mm) -> bool:
+    hx, hy = hoop_mm[0] / 2 - margin_mm, hoop_mm[1] / 2 - margin_mm
+    # the CLI centres on the outlines, so compare the stitch extent with the area's size
+    return (b[2] - b[0]) > 2 * hx + STITCH_TOLERANCE_MM or (b[3] - b[1]) > 2 * hy + STITCH_TOLERANCE_MM
 
 
 def _size_and_centre(design: Design, w: float, h: float, width_mm, fit, hoop_mm,
@@ -321,7 +367,8 @@ def _size_and_centre(design: Design, w: float, h: float, width_mm, fit, hoop_mm,
             raise ConversionError("The design has no width (a vertical line), so --width "
                                   "cannot size it")
         scale = width_mm / w
-    if w * scale > avail_w or h * scale > avail_h:
+    # 0.01 mm slack: svgelements' px-per-mm factor is rounded, so 96 mm can load as 96.00005
+    if w * scale > avail_w + 0.01 or h * scale > avail_h + 0.01:
         fit_scale = _fit_scale(w, h, avail_w, avail_h)
         if fit:
             warnings.append(f"Design scaled to {fit_scale:.0%} to fit the hoop")
@@ -338,14 +385,22 @@ def _size_and_centre(design: Design, w: float, h: float, width_mm, fit, hoop_mm,
     return scale
 
 
-def outside_hoop(design: Design, hoop_mm: tuple[float, float], margin_mm: float) -> list[str]:
+def outside_hoop(design: Design, hoop_mm: tuple[float, float], margin_mm: float,
+                 report: Report | None = None) -> list[str]:
     """Ids of active objects that reach outside the sewing area (hoop minus margin),
-    for a design placed in hoop coordinates (hoop centre at 0,0)."""
+    for a design placed in hoop coordinates (hoop centre at 0,0). With the plan's
+    report, an object also counts if its *stitches* reach outside: a satin column or
+    a fill's pull compensation goes a little past the outline."""
     hx, hy = hoop_mm[0] / 2 - margin_mm, hoop_mm[1] / 2 - margin_mm
+
+    def out_of(b, tol):
+        return b[0] < -hx - tol or b[2] > hx + tol or b[1] < -hy - tol or b[3] > hy + tol
+
+    stitched = report.object_bounds if report is not None else {}
     out = []
     for o in design.active():
-        x0, y0, x1, y1 = o.bounds()
-        if x0 < -hx - 1e-6 or x1 > hx + 1e-6 or y0 < -hy - 1e-6 or y1 > hy + 1e-6:
+        # object extents come from the planned (unrounded) needle points: no rounding slack
+        if out_of(o.bounds(), 1e-6) or (o.obj_id in stitched and out_of(stitched[o.obj_id], 1e-6)):
             out.append(o.obj_id)
     return out
 
