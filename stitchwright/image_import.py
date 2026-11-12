@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 
 from .geometry import chaikin, polygon_area, simplify
 from .svg_import import DesignObject, Polyline
@@ -32,6 +32,7 @@ class TraceSettings:
 def _prepare(path: str) -> Image.Image:
     img = Image.open(path)
     img.load()
+    img = ImageOps.exif_transpose(img)     # phone photos are often stored sideways
     if img.mode in ("RGBA", "LA", "P"):
         rgba = img.convert("RGBA")
         white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))

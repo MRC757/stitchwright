@@ -69,6 +69,17 @@ def test_picture_is_traced_into_coloured_shapes(tmp_path):
     assert all(pl.closed for pl in blue.polylines)
 
 
+def test_photos_stored_sideways_are_turned_upright(tmp_path):
+    from PIL import Image
+    from stitchwright.image_import import _prepare
+    img = Image.new("RGB", (40, 20), "red")
+    exif = Image.Exif()
+    exif[0x0112] = 6                     # Orientation: turn 90 degrees to view
+    p = tmp_path / "phone.jpg"
+    img.save(p, exif=exif)
+    assert _prepare(str(p)).size == (20, 40)
+
+
 def test_illustrator_72dpi_exports_are_spotted_and_scaled(tmp_path):
     p = tmp_path / "ai.svg"
     p.write_text('<?xml version="1.0"?>\n<!-- Generator: Adobe Illustrator 27.0.0 -->\n'
