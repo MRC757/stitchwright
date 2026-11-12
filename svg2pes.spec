@@ -8,7 +8,7 @@ a = Analysis(
     pathex=["."],
     datas=[("svg2pes/assets", "svg2pes/assets")],
     # fontTools imports its font-table modules by name at run time
-    hiddenimports=collect_submodules("fontTools.ttLib.tables"),
+    hiddenimports=collect_submodules("fontTools.ttLib.tables") + ["HersheyFonts"],
     excludes=["pytest", "matplotlib", "scipy", "pandas", "IPython"],
     noarchive=False,
 )

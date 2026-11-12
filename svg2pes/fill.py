@@ -294,55 +294,94 @@ def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
     return travel_join(paths, rings, L=2.5)
 
 
+class _Line:
+    """A polyline measured by distance along it."""
+
+    def __init__(self, pts):
+        self.pts = pts
+        self.seg = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
+        self.cum = [0.0]
+        for d in self.seg:
+            self.cum.append(self.cum[-1] + d)
+        self.total = self.cum[-1]
+
+    def at(self, s: float) -> Point:
+        s = max(0.0, min(self.total, s))
+        i = 0
+        while i < len(self.seg) - 1 and self.cum[i + 1] < s:
+            i += 1
+        t = 0.0 if self.seg[i] == 0 else (s - self.cum[i]) / self.seg[i]
+        a, b = self.pts[i], self.pts[i + 1]
+        return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+    def tangent(self, s: float, h: float) -> Point:
+        """Direction at s, averaged over h either side (one-sided at the ends)."""
+        p0, p1 = self.at(s - h), self.at(s + h)
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        n = math.hypot(dx, dy) or 1.0
+        return dx / n, dy / n
+
+
+def _split_at_corners(pts, max_turn_deg=100.0, look=0.8):
+    """Pieces of a line, cut where it turns more sharply than max_turn_deg, so a
+    satin column doesn't fan out into spikes at hairpin bends."""
+    line = _Line(pts)
+    cuts = []
+    for i in range(1, len(pts) - 1):
+        s = line.cum[i]
+        if s < look or line.total - s < look:
+            continue
+        a, b, c = line.at(s - look), pts[i], line.at(s + look)
+        v1, v2 = (b[0] - a[0], b[1] - a[1]), (c[0] - b[0], c[1] - b[1])
+        n1, n2 = math.hypot(*v1), math.hypot(*v2)
+        if n1 < 1e-9 or n2 < 1e-9:
+            continue
+        cos = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)))
+        if math.degrees(math.acos(cos)) > max_turn_deg and (not cuts or s - line.cum[cuts[-1]] > look):
+            cuts.append(i)
+    pieces, start = [], 0
+    for i in cuts:
+        pieces.append(pts[start:i + 1])
+        start = i
+    pieces.append(pts[start:])
+    return [p for p in pieces if len(p) >= 2]
+
+
+def _zigzag(pts, half: float, spacing: float) -> list[Point]:
+    line = _Line(pts)
+    if line.total <= 0:
+        return []
+    n = max(2, math.ceil(line.total / spacing))
+    h = max(0.6, half)
+    out = []
+    for i in range(n + 1):
+        s = line.total * i / n
+        x, y = line.at(s)
+        tx, ty = line.tangent(s, h)
+        side = half if i % 2 == 0 else -half
+        out.append((x - ty * side, y + tx * side))
+    return out
+
+
 def satin_path(points, closed: bool, spec: SatinSpec, min_len: float = 0.4) -> list[Point]:
-    """Needle points for a satin column of spec.width centred on a line."""
+    """Needle points for a satin column of spec.width centred on a line. A
+    centre-walk underlay goes out first and the satin comes back over it; the
+    column is split at sharp corners."""
     pts = list(points)
     if closed and pts[0] != pts[-1]:
         pts.append(pts[0])
     if len(pts) < 2:
         return []
-    seg = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
-    total = sum(seg)
-    if total < min_len:
+    line = _Line(pts)
+    if line.total < min_len:
         return []
-    cum = [0.0]
-    for d in seg:
-        cum.append(cum[-1] + d)
-
-    def at(s):
-        """Point and unit tangent at distance s along the line."""
-        s = max(0.0, min(total, s))
-        i = 0
-        while i < len(seg) - 1 and cum[i + 1] < s:
-            i += 1
-        t = 0.0 if seg[i] == 0 else (s - cum[i]) / seg[i]
-        a, b = pts[i], pts[i + 1]
-        return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-
-    def tangent(s):
-        h = 0.6
-        p0 = at(s - h) if (s - h >= 0 or not closed) else at((s - h) % total)
-        p1 = at(s + h) if (s + h <= total or not closed) else at((s + h) % total)
-        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
-        n = math.hypot(dx, dy) or 1.0
-        return dx / n, dy / n
-
     half = (spec.width + spec.pull_comp) / 2
-    n = max(2, math.ceil(total / spec.spacing))
     out: list[Point] = []
     if spec.underlay:                                   # centre walk out ...
-        k = max(1, math.ceil(total / 2.0))
-        out += [at(total * i / k) for i in range(k + 1)]
+        k = max(1, math.ceil(line.total / 2.0))
+        out += [line.at(line.total * i / k) for i in range(k + 1)]
         if not closed:                                  # ... and the satin comes back
-            pts.reverse()
-            cum = [0.0]
-            seg.reverse()
-            for d in seg:
-                cum.append(cum[-1] + d)
-    for i in range(n + 1):
-        s = total * i / n
-        x, y = at(s)
-        tx, ty = tangent(s)
-        side = half if i % 2 == 0 else -half
-        out.append((x - ty * side, y + tx * side))
+            pts = pts[::-1]
+    for piece in _split_at_corners(pts):
+        out += _zigzag(piece, half, spec.spacing)
     return _drop_close(out, min_len * 0.5)

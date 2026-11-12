@@ -47,7 +47,6 @@ def test_reads_objects_in_mm():
     x0, y0, x1, y1 = d.bounds()
     assert (x1 - x0) == pytest.approx(56.0, abs=0.05)
     assert (y1 - y0) == pytest.approx(36.0, abs=0.05)
-    assert any("Text" in w for w in d.warnings)
 
 
 def test_multi_subpath_strokes_stay_separate():
@@ -578,3 +577,59 @@ def test_open_pes_keeps_every_stitch(tmp_path):
     assert again.report.stitch_count == rep.stitch_count
     with pytest.raises(ValueError):
         load_stitches(str(tmp_path / "x.txt"))
+
+
+# --- lettering --------------------------------------------------------------------
+
+TEXT_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="40mm" viewBox="0 0 60 40">'
+            '<text x="10" y="20" font-family="Arial" font-size="10" fill="#d62828">Hi</text>'
+            '<text x="30" y="35" font-family="NoSuchFont" font-size="6" text-anchor="middle">Mid</text>'
+            '</svg>')
+
+
+def test_svg_text_is_stitched_with_the_matching_font(tmp_path):
+    from svg2pes.geometry import bounds
+    _font()
+    p = tmp_path / "t.svg"
+    p.write_text(TEXT_SVG)
+    d = load_svg(str(p))
+    assert [o.kind for o in d.objects] == ["Text", "Text"]
+    hi, mid = d.objects
+    x0, y0, x1, y1 = bounds([q for pl in hi.polylines for q in pl.points])
+    assert x0 == pytest.approx(10, abs=1.2)            # starts at x = 10 (plus the H's bearing)
+    assert y1 == pytest.approx(20, abs=0.05)           # sits on the baseline y = 20
+    assert y1 - y0 == pytest.approx(10 * 0.716, abs=0.3)   # Arial's capitals are 0.716 em
+    assert d.texts[hi.obj_id].font_name == "Arial"
+    mx0, _, mx1, _ = bounds([q for pl in mid.polylines for q in pl.points])
+    assert (mx0 + mx1) / 2 == pytest.approx(30, abs=0.6)   # text-anchor: middle
+    assert any("NoSuchFont" in w for w in d.warnings)
+
+
+def test_single_line_fonts_are_open_strokes():
+    from svg2pes.geometry import bounds
+    from svg2pes.text import TextSpec, installed_fonts, text_polylines
+    path, idx = installed_fonts()["Single-line Sans"]
+    polys, missing = text_polylines(TextSpec("HELLO", path, "Single-line Sans", idx, 8))
+    assert polys and not any(pl.closed for pl in polys) and missing == ""
+    x0, y0, x1, y1 = bounds([q for pl in polys for q in pl.points])
+    assert y1 - y0 == pytest.approx(8, abs=0.2)
+
+
+def test_monogram_and_arc_layouts():
+    from svg2pes.geometry import bounds
+    from svg2pes.text import TextSpec, text_polylines
+    name, path, idx = _font()
+    mono, _ = text_polylines(TextSpec("ABC", path, name, idx, 10, monogram=True))
+    _, y0, _, y1 = bounds([q for pl in mono for q in pl.points])
+    assert y1 - y0 == pytest.approx(16, abs=0.3)       # the middle letter is 1.6 times taller
+    flat, _ = text_polylines(TextSpec("ARCHED", path, name, idx, 8))
+    arch, _ = text_polylines(TextSpec("ARCHED", path, name, idx, 8, arc=90))
+    smile, _ = text_polylines(TextSpec("ARCHED", path, name, idx, 8, arc=-90))
+    hf = bounds([q for pl in flat for q in pl.points])
+    ha = bounds([q for pl in arch for q in pl.points])
+    assert ha[3] - ha[1] > (hf[3] - hf[1]) * 1.5       # bending makes it taller
+    # arch: the middle letters are highest; smile: lowest
+    def mid_top(polys):
+        xs = [q for pl in polys for q in pl.points if abs(q[0]) < 2]
+        return min(q[1] for q in xs)
+    assert mid_top(arch) < mid_top(smile)

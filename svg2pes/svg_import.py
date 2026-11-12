@@ -51,6 +51,7 @@ class DesignObject:
 class Design:
     objects: list[DesignObject]
     warnings: list[str]
+    texts: dict = field(default_factory=dict)    # obj_id -> TextSpec, for SVG <text>
 
     def active(self) -> list[DesignObject]:
         return [o for o in self.objects if not o.skipped and o.polylines]
@@ -121,16 +122,21 @@ def load_svg(path: str) -> Design:
     objects: list[DesignObject] = []
     warnings: list[str] = []
     seen_ids: set[str] = set()
+    texts: dict = {}
     elements = list(svg.elements())
     # ids written in the file, so generated names ("obj3", "a_2") never clash with them
     all_ids = {e.id for e in elements if getattr(e, "id", None)}
 
     for el in elements:
         name = type(el).__name__
-        if name in ("Text", "Image"):
-            warnings.append(
-                f"{name} element ignored (only vector shapes are stitched; convert text "
-                "to paths, or add it in the window with Add text)")
+        if name == "Image":
+            warnings.append("Image element ignored (pictures inside an SVG are not stitched; "
+                            "import the picture on its own instead)")
+            continue
+        if name == "Text":
+            obj = _text_object(el, len(objects) + 1, seen_ids, all_ids, texts, warnings)
+            if obj is not None:
+                objects.append(obj)
             continue
         if not isinstance(el, Shape):
             continue
@@ -147,15 +153,46 @@ def load_svg(path: str) -> Design:
         if not polys:
             continue
 
-        base = el.id or f"obj{idx}"
-        obj_id, n = base, 2
-        while obj_id in seen_ids or obj_id in all_ids - {el.id}:
-            obj_id = f"{base}_{n}"
-            n += 1
-        seen_ids.add(obj_id)
+        obj_id = _unique_id(el.id or f"obj{idx}", el.id, seen_ids, all_ids)
         obj = DesignObject(idx, obj_id, name, color, polys, color=color)
         objects.append(obj)
 
     if not objects:
         warnings.append("No stitchable shapes found in the SVG")
-    return Design(objects, warnings)
+    return Design(objects, warnings, texts)
+
+
+def _unique_id(base: str, own_id, seen_ids: set, all_ids: set) -> str:
+    obj_id, n = base, 2
+    while obj_id in seen_ids or obj_id in all_ids - {own_id}:
+        obj_id = f"{base}_{n}"
+        n += 1
+    seen_ids.add(obj_id)
+    return obj_id
+
+
+def _text_object(el, idx, seen_ids, all_ids, texts, warnings):
+    """An SVG <text> as an object of letter outlines in the matching installed font."""
+    content = (el.text or "").strip()
+    if not content:
+        return None
+    color = _color_of(getattr(el, "stroke", None)) or _color_of(getattr(el, "fill", None)) \
+        or (0, 0, 0)
+    try:
+        from .text import text_from_svg      # here, not at the top: text.py imports this module
+        m = el.transform
+        polys, spec, warn = text_from_svg(content, float(el.x or 0), float(el.y or 0),
+                                          getattr(el, "font_family", None),
+                                          float(getattr(el, "font_size", 16) or 16),
+                                          getattr(el, "anchor", "start"),
+                                          (m.a, m.b, m.c, m.d, m.e, m.f), PX_TO_MM)
+    except Exception as e:      # no fonts, unreadable font, ...
+        warnings.append(f"Text \"{content}\" could not be converted ({e}); convert it to paths")
+        return None
+    if warn:
+        warnings.append(warn)
+    if not polys:
+        return None
+    obj_id = _unique_id(el.id or f"text{idx}", el.id, seen_ids, all_ids)
+    texts[obj_id] = spec
+    return DesignObject(idx, obj_id, "Text", color, polys, color=color)

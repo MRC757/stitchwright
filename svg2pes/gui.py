@@ -197,6 +197,8 @@ class TextDialog(tk.Toplevel):
         self.v_height = tk.StringVar(value=f"{spec.height_mm:g}")
         self.v_spacing = tk.StringVar(value=f"{spec.spacing_mm:g}")
         self.v_align = tk.StringVar(value=spec.align)
+        self.v_arc = tk.StringVar(value=f"{spec.arc:g}")
+        self.v_mono = tk.BooleanVar(value=spec.monogram)
         ttk.Label(f, text="Letter height (mm)").grid(row=2, column=0, sticky="w", pady=2)
         ttk.Entry(f, textvariable=self.v_height, width=7).grid(row=2, column=1, sticky="w")
         ttk.Label(f, text="height of the capital letters; 8 mm or more sews best",
@@ -208,22 +210,33 @@ class TextDialog(tk.Toplevel):
         af.grid(row=4, column=1, columnspan=3, sticky="w")
         for val, label in (("left", "Left"), ("center", "Centre"), ("right", "Right")):
             ttk.Radiobutton(af, text=label, value=val, variable=self.v_align).pack(side="left", padx=(0, 8))
+        ttk.Label(f, text="Arc (°)").grid(row=5, column=0, sticky="w", pady=2)
+        arcf = ttk.Frame(f)
+        arcf.grid(row=5, column=1, columnspan=3, sticky="w")
+        ttk.Entry(arcf, textvariable=self.v_arc, width=7).pack(side="left")
+        ttk.Label(arcf, text="  0 = straight; 90 arches up, -90 curves down",
+                  foreground="#666666").pack(side="left")
+        ttk.Checkbutton(f, text="Monogram: three letters, the middle one larger",
+                        variable=self.v_mono).grid(row=6, column=0, columnspan=4, sticky="w", pady=2)
+        ttk.Label(f, foreground="#666666", text="Tip: the Single-line fonts (top of the list) sew "
+                  "each letter as one clean line: best for small lettering.").grid(
+            row=7, column=0, columnspan=4, sticky="w")
 
         self.cv = tk.Canvas(f, width=int(480 * ui), height=int(150 * ui), bg="white",
                             highlightthickness=1, highlightbackground="#cccccc")
-        self.cv.grid(row=5, column=0, columnspan=4, pady=(8, 2))
+        self.cv.grid(row=8, column=0, columnspan=4, pady=(8, 2))
         self.info = ttk.Label(f, text="", foreground="#555555")
-        self.info.grid(row=6, column=0, columnspan=4, sticky="w")
+        self.info.grid(row=9, column=0, columnspan=4, sticky="w")
 
         b = ttk.Frame(f)
-        b.grid(row=7, column=0, columnspan=4, sticky="e", pady=(8, 0))
+        b.grid(row=10, column=0, columnspan=4, sticky="e", pady=(8, 0))
         ttk.Button(b, text="Cancel", command=self.destroy).pack(side="right")
         ttk.Button(b, text="OK", command=self._ok).pack(side="right", padx=6)
 
         self.t_text.bind("<KeyRelease>", lambda e: self._schedule())
         self.c_font.bind("<KeyRelease>", self._filter)
         self.c_font.bind("<<ComboboxSelected>>", lambda e: self._schedule())
-        for v in (self.v_height, self.v_spacing, self.v_align):
+        for v in (self.v_height, self.v_spacing, self.v_align, self.v_arc, self.v_mono):
             v.trace_add("write", lambda *a: self._schedule())
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Control-Return>", lambda e: self._ok())
@@ -261,8 +274,14 @@ class TextDialog(tk.Toplevel):
         if height <= 0:
             raise ValueError("Letter height must be more than 0")
         path, idx = self.fonts[name]
+        try:
+            arc = float(self.v_arc.get() or 0)
+        except ValueError:
+            raise ValueError("Arc must be a number of degrees") from None
+        if not -300 <= arc <= 300:
+            raise ValueError("Arc must be between -300 and 300 degrees")
         return TextSpec(self.t_text.get("1.0", "end-1c"), path, name, idx, height,
-                        self.v_align.get(), spacing)
+                        self.v_align.get(), spacing, arc=arc, monogram=self.v_mono.get())
 
     def _schedule(self):
         if self._job is not None:
@@ -1065,10 +1084,11 @@ class App:
             pass            # keep the last good hoop size
         self._clear_design()
         self.svg_path = path
-        self.svg_map = {o.obj_id: o for o in design.objects}
+        for o in design.objects:
+            (self.text_objs if o.obj_id in design.texts else self.svg_map)[o.obj_id] = o
+        self.texts.update(design.texts)
         self.order_ids = [o.obj_id for o in design.objects]
-        self.warnings = ["Text in the SVG was ignored: use Add text… instead" if "Text element" in w
-                         else w for w in design.warnings]
+        self.warnings = list(design.warnings)
         if any(o.stitches for o in design.objects):
             m, s = IDENTITY, 1.0          # embroidery files are already placed on the hoop
         else:
@@ -1117,11 +1137,12 @@ class App:
         if not design.objects:
             self.set_status("Nothing stitchable was found in that file.", WARN_COLOUR)
             return
-        self.add_objects(design.objects, keep_place=any(o.stitches for o in design.objects))
+        self.add_objects(design.objects, keep_place=any(o.stitches for o in design.objects),
+                         texts=design.texts)
         if self.svg_path is None:
             self.svg_path = path
 
-    def add_objects(self, objects, keep_place: bool = False, fills=None):
+    def add_objects(self, objects, keep_place: bool = False, fills=None, texts=None):
         """Add new objects to the design (renamed if their ids are taken), centred in the
         hoop (or left where they are), and select them."""
         self.push_undo()
@@ -1134,7 +1155,11 @@ class App:
                 nid = f"{o.obj_id}_{n}"
                 n += 1
             index += 1
-            self.extra_objs[nid] = replace(o, index=index, obj_id=nid)
+            if texts and o.obj_id in texts:
+                self.text_objs[nid] = replace(o, index=index, obj_id=nid)
+                self.texts[nid] = texts[o.obj_id]
+            else:
+                self.extra_objs[nid] = replace(o, index=index, obj_id=nid)
             self.order_ids.append(nid)
             self.mats[nid] = self.home[nid] = m
             if fills and o.obj_id in fills:
@@ -1653,6 +1678,11 @@ class App:
             return
         self.push_undo()
         o = self.text_objs[oid]
+        old = [q for pl in o.polylines for q in pl.points]
+        if old:
+            ob = bounds(old)
+            cx, cy = (ob[0] + ob[2]) / 2, (ob[1] + ob[3]) / 2
+            polys = [Polyline([(x + cx, y + cy) for x, y in pl.points], pl.closed) for pl in polys]
         self.text_objs[oid] = DesignObject(o.index, oid, "Text", o.source_color, polys,
                                            color=o.source_color)
         self.texts[oid] = spec
