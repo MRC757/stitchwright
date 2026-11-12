@@ -5,23 +5,23 @@ import pyembroidery
 import pytest
 
 from conftest import SAMPLE
-from svg2pes.convert import convert, plan_design
-from svg2pes.svg_import import load_svg
+from stitchwright.convert import convert, plan_design
+from stitchwright.svg_import import load_svg
 
 
 # --- projects and opening embroidery files -----------------------------------------
 
 def test_project_round_trip_is_exact(tmp_path):
-    from svg2pes.fill import FillSpec, SatinSpec
-    from svg2pes.geometry import rotate
-    from svg2pes.project import Project, load_project, save_project
+    from stitchwright.fill import FillSpec, SatinSpec
+    from stitchwright.geometry import rotate
+    from stitchwright.project import Project, load_project, save_project
     d = load_svg(SAMPLE)
     mats = {o.obj_id: rotate(10) for o in d.objects}
     p = Project(d.objects, mats, dict(mats), {"sun": (0, 0, 0)}, {"wave"},
                 {"star": FillSpec(color=(237, 23, 31), angle=20)}, {"star"},
                 {"badge": SatinSpec(width=2.5)}, {}, {"sun": "group 1", "star": "group 1"},
                 [(0, (237, 23, 31))], {"hoop": ["100", "100"], "stitch_len": "3"}, SAMPLE, ["w"])
-    path = str(tmp_path / "x.svg2pes")
+    path = str(tmp_path / "x.stitchwright")
     save_project(path, p)
     q = load_project(path)
     assert [o.obj_id for o in q.objects] == [o.obj_id for o in d.objects]
@@ -32,10 +32,10 @@ def test_project_round_trip_is_exact(tmp_path):
 
 
 def test_bad_project_file_is_refused(tmp_path):
-    from svg2pes.project import load_project
-    f = tmp_path / "bad.svg2pes"
+    from stitchwright.project import load_project
+    f = tmp_path / "bad.stitchwright"
     f.write_text('{"format": "something else"}')
-    with pytest.raises(ValueError, match="not an svg2pes project"):
+    with pytest.raises(ValueError, match="not a Stitchwright project"):
         load_project(str(f))
     f.write_text("{not json")
     with pytest.raises(ValueError):
@@ -43,7 +43,7 @@ def test_bad_project_file_is_refused(tmp_path):
 
 
 def test_open_pes_keeps_every_stitch(tmp_path):
-    from svg2pes.pes_import import load_stitches
+    from stitchwright.pes_import import load_stitches
     out = str(tmp_path / "o.pes")
     rep = convert(SAMPLE, out, fills={"star": None})
     d = load_stitches(out)
@@ -56,7 +56,7 @@ def test_open_pes_keeps_every_stitch(tmp_path):
 
 
 def test_files_without_colours_get_distinct_placeholder_threads(tmp_path):
-    from svg2pes.pes_import import load_stitches
+    from stitchwright.pes_import import load_stitches
     p = pyembroidery.EmbPattern()
     for i, c in enumerate(("red", "blue", "green")):
         if i:
@@ -77,16 +77,16 @@ def test_files_without_colours_get_distinct_placeholder_threads(tmp_path):
 def test_project_fonts_are_found_by_name_on_another_computer(tmp_path):
     import json
     from conftest import any_font
-    from svg2pes.document import DocError, Document
-    from svg2pes.project import load_project, save_project
-    from svg2pes.stitching import Settings
-    from svg2pes.text import TextSpec
+    from stitchwright.document import DocError, Document
+    from stitchwright.project import load_project, save_project
+    from stitchwright.stitching import Settings
+    from stitchwright.text import TextSpec
     name, path, idx = any_font()
     doc = Document()
     doc.add_text(TextSpec("Hi", path, name, idx, 8))
     doc.add_text(TextSpec("Yo", path, "Some Font Nobody Has", idx, 8))
     stitches = doc.plan(Settings()).plan.report.stitch_count
-    proj = str(tmp_path / "p.svg2pes")
+    proj = str(tmp_path / "p.stitchwright")
     save_project(proj, doc.to_project({}))
     # pretend the project was made on a PC whose fonts lived somewhere else
     data = json.load(open(proj, encoding="utf-8"))
@@ -111,8 +111,8 @@ def replace_text(spec, text):
 
 def test_text_dialog_falls_back_to_the_default_font(window):
     from conftest import any_font
-    from svg2pes.dialogs import TextDialog
-    from svg2pes.text import TextSpec
+    from stitchwright.dialogs import TextDialog
+    from stitchwright.text import TextSpec
     name, path, idx = any_font()
     dlg = TextDialog(window, 1.0, TextSpec("Hi", "Z:/missing/font.ttf", "Gone Font", 0, 8),
                      editing=True)

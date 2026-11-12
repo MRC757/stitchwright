@@ -1,12 +1,12 @@
-# PyInstaller build file for the svg2pes window.  Build with:  .\build_exe.ps1
-# (or: pyinstaller --clean --noconfirm svg2pes.spec)  ->  dist\svg2pes.exe
+# PyInstaller build file for the Stitchwright window.  Build with:  .\build_exe.ps1
+# (or: pyinstaller --clean --noconfirm stitchwright.spec)  ->  dist\stitchwright.exe
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 
 a = Analysis(
-    ["svg2pes_gui.pyw"],
+    ["stitchwright.pyw"],
     pathex=["."],
-    datas=[("svg2pes/assets", "svg2pes/assets")],
+    datas=[("stitchwright/assets", "stitchwright/assets")],
     # fontTools imports its font-table modules by name at run time
     hiddenimports=collect_submodules("fontTools.ttLib.tables") + ["HersheyFonts"],
     excludes=["pytest", "matplotlib", "scipy", "pandas", "IPython"],
@@ -20,8 +20,8 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="svg2pes",
-    icon="svg2pes/assets/icon.ico",
+    name="stitchwright",
+    icon="stitchwright/assets/icon.ico",
     console=False,          # a window app: no black console box
     upx=False,              # UPX-packed exes trip more antivirus false alarms
     version="version_info.txt",

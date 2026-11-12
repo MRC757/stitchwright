@@ -1,5 +1,8 @@
 # Implementation plan: code-review follow-ups
 
+> **Completed in 0.2.0.** Written before the rename to Stitchwright: `svg2pes/` here is
+> now `stitchwright/`, and the commands and files are named to match.
+
 Written for an AI coding agent (Claude Opus) working in this repository in a fresh session.
 It assumes no memory of how the code was written. Read the whole plan before starting, then
 work through the phases in order. Each task says where the code is, what to change, how to

@@ -2,8 +2,8 @@
 import pytest
 
 from conftest import SAMPLE, write_svg
-from svg2pes.convert import convert
-from svg2pes.svg_import import load_svg
+from stitchwright.convert import convert
+from stitchwright.svg_import import load_svg
 
 
 # --- SVG import ------------------------------------------------------------
@@ -49,9 +49,9 @@ def test_bad_svg_is_a_clear_error(tmp_path):
 
 def test_picture_is_traced_into_coloured_shapes(tmp_path):
     from PIL import Image, ImageDraw
-    from svg2pes.fill import closed_rings
-    from svg2pes.geometry import bounds
-    from svg2pes.image_import import TraceSettings, trace_image
+    from stitchwright.fill import closed_rings
+    from stitchwright.geometry import bounds
+    from stitchwright.image_import import TraceSettings, trace_image
     img = Image.new("RGB", (200, 100), (240, 240, 240))
     d = ImageDraw.Draw(img)
     d.rectangle([10, 10, 90, 90], fill=(200, 30, 40))

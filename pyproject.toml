@@ -3,9 +3,9 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "svg2pes"
+name = "stitchwright"
 dynamic = ["version"]
-description = "Turn SVG artwork and pictures into Brother PES embroidery files, with a design window"
+description = "Stitchwright: turn artwork into Brother PES embroidery files, with a design window"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -28,22 +28,22 @@ classifiers = [
 dev = ["pytest", "pyflakes"]
 
 [project.scripts]
-svg2pes = "svg2pes.cli:main"
+stitchwright = "stitchwright.cli:main"
 
 [project.gui-scripts]
-svg2pes-gui = "svg2pes.gui:main"
+stitchwright-gui = "stitchwright.gui:main"
 
 [project.urls]
-Homepage = "https://github.com/MRC757/svg2pes"
+Homepage = "https://github.com/MRC757/stitchwright"
 
 [tool.setuptools]
-packages = ["svg2pes"]
+packages = ["stitchwright"]
 
 [tool.setuptools.dynamic]
-version = { attr = "svg2pes.__version__" }
+version = { attr = "stitchwright.__version__" }
 
 [tool.setuptools.package-data]
-svg2pes = ["assets/*"]
+stitchwright = ["assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 (2026-11-12)
+
+- **Renamed to Stitchwright** (it was svg2pes): the package and its commands (`stitchwright`,
+  `stitchwright-gui`), the Windows app (`stitchwright.exe`, double-click `stitchwright.pyw`),
+  the window title and the GitHub repository. Project files are now `.stitchwright`;
+  `.svg2pes` projects saved by earlier versions still open. The log moved to
+  `%LOCALAPPDATA%\stitchwright\stitchwright.log`.
+
 ## 0.2.0 (2026-11-12)
 
 Everything since the first milestone. Only `samples/sample.pes` (run-stitch outlines, PES

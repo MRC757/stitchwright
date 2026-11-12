@@ -37,7 +37,7 @@ def stitch_lengths(pattern):
 
 def any_font():
     """(name, path, index) of an installed outline font, or skip the test."""
-    from svg2pes.text import default_font
+    from stitchwright.text import default_font
     f = default_font()
     if f is None:
         pytest.skip("no fonts installed")
@@ -45,7 +45,7 @@ def any_font():
 
 
 def square(x0, y0, x1, y1):
-    from svg2pes.svg_import import Polyline
+    from stitchwright.svg_import import Polyline
     return Polyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], True)
 
 

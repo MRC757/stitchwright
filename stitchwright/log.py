@@ -1,6 +1,6 @@
 """Logging to a file, so problems in the window app (which has no console) can be reported.
 
-The log lives in %LOCALAPPDATA%\\svg2pes\\svg2pes.log on Windows, ~/.svg2pes/svg2pes.log
+The log lives in %LOCALAPPDATA%\\stitchwright\\stitchwright.log on Windows, ~/.stitchwright/stitchwright.log
 elsewhere (or the temp folder if neither can be written), and rotates at about 1 MB.
 """
 from __future__ import annotations
@@ -11,18 +11,18 @@ import os
 import sys
 import tempfile
 
-LOG_NAME = "svg2pes.log"
-log = logging.getLogger("svg2pes")
+LOG_NAME = "stitchwright.log"
+log = logging.getLogger("stitchwright")
 
 
 def default_log_dir() -> str:
     if sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
-        return os.path.join(os.environ["LOCALAPPDATA"], "svg2pes")
-    return os.path.join(os.path.expanduser("~"), ".svg2pes")
+        return os.path.join(os.environ["LOCALAPPDATA"], "stitchwright")
+    return os.path.join(os.path.expanduser("~"), ".stitchwright")
 
 
 def setup_logging(log_dir: str | None = None) -> str:
-    """Send svg2pes log messages to a rotating file (and to stderr when there is one).
+    """Send Stitchwright log messages to a rotating file (and to stderr when there is one).
     Returns the log file's path. Safe to call more than once."""
     folder = log_dir or default_log_dir()
     try:

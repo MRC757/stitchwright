@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from svg2pes import gui
+from stitchwright import gui
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "samples", "sample.svg")
 
@@ -22,7 +22,7 @@ def test_settings_changes_mark_the_design_modified(app, tmp_path, monkeypatch):
     assert not app.doc.dirty                       # opening isn't a change
     app.v_margin.set("4")
     assert app.doc.dirty
-    proj = str(tmp_path / "p.svg2pes")
+    proj = str(tmp_path / "p.stitchwright")
     monkeypatch.setattr(gui.filedialog, "asksaveasfilename", lambda **k: proj)
     assert app.save_project()
     assert not app.doc.dirty
@@ -35,8 +35,8 @@ def test_settings_changes_mark_the_design_modified(app, tmp_path, monkeypatch):
 
 def test_ctrl_enter_in_the_text_dialog_presses_ok_without_a_new_line(window):
     from conftest import any_font
-    from svg2pes.dialogs import TextDialog
-    from svg2pes.text import TextSpec
+    from stitchwright.dialogs import TextDialog
+    from stitchwright.text import TextSpec
     name, path, idx = any_font()
     window.deiconify()                      # key events only reach a window on screen
     dlg = TextDialog(window, 1.0, TextSpec("", path, name, idx, 8), editing=False)
@@ -47,3 +47,21 @@ def test_ctrl_enter_in_the_text_dialog_presses_ok_without_a_new_line(window):
     dlg.t_text.event_generate("<Control-Return>")
     window.update()
     assert dlg.result is not None and dlg.result.text == "Fly"
+
+
+def test_projects_saved_before_the_rename_still_open(app, tmp_path, monkeypatch):
+    """Stitchwright was svg2pes: its .svg2pes projects ('svg2pes-project') still open."""
+    import json
+    new = str(tmp_path / "p.stitchwright")
+    monkeypatch.setattr(gui.filedialog, "asksaveasfilename", lambda **k: new)
+    app.open(SAMPLE)
+    assert app.save_project()
+    stitches = app.plan.report.stitch_count
+    data = json.load(open(new, encoding="utf-8"))
+    assert data["format"] == "stitchwright-project"
+    data["format"] = "svg2pes-project"                 # as an older version wrote it
+    old = str(tmp_path / "old.svg2pes")
+    json.dump(data, open(old, "w", encoding="utf-8"))
+    app.new_design(confirm=False)
+    app.open(old)
+    assert app.doc.order_ids and app.plan.report.stitch_count == stitches

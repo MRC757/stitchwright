@@ -1,4 +1,5 @@
-"""Project files (.svg2pes): everything needed to reopen a design and keep working.
+"""Project files (.stitchwright): everything needed to reopen a design and keep working.
+Projects saved before the rename from svg2pes (.svg2pes files) open too.
 
 A project is JSON. It stores each object's own outline (so the original SVG is
 not needed), where it sits in the hoop, its threads, fill, satin and text
@@ -14,9 +15,13 @@ from .fill import FillSpec, SatinSpec
 from .svg_import import DesignObject, Polyline
 from .text import HERSHEY_PREFIX, TextSpec, installed_fonts
 
-FORMAT = "svg2pes-project"
+FORMAT = "stitchwright-project"
 VERSION = 1
-EXTENSION = ".svg2pes"
+EXTENSION = ".stitchwright"
+# the program was called svg2pes before 0.2.1; its project files are the same format
+LEGACY_FORMATS = ("svg2pes-project",)
+LEGACY_EXTENSIONS = (".svg2pes",)
+PROJECT_EXTENSIONS = (EXTENSION,) + LEGACY_EXTENSIONS
 
 
 @dataclass
@@ -81,10 +86,10 @@ def to_dict(p: Project) -> dict:
 
 
 def from_dict(d: dict) -> Project:
-    if d.get("format") != FORMAT:
-        raise ValueError("This is not an svg2pes project file")
+    if d.get("format") != FORMAT and d.get("format") not in LEGACY_FORMATS:
+        raise ValueError("This is not a Stitchwright project file")
     if int(d.get("version", 0)) > VERSION:
-        raise ValueError("This project was saved by a newer svg2pes; please update")
+        raise ValueError("This project was saved by a newer Stitchwright; please update")
 
     def fill(v):
         v = dict(v)

@@ -1,8 +1,8 @@
 """Tests: the shared polyline helpers in geometry.py."""
 import pytest
 
-from svg2pes.geometry import (chaikin, drop_close, point_in_polygon, polygon_area,
-                              segment_distance, simplify, subdivide)
+from stitchwright.geometry import (chaikin, drop_close, point_in_polygon, polygon_area,
+                                   segment_distance, simplify, subdivide)
 
 SQUARE = [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)]
 

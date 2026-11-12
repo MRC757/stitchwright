@@ -2,16 +2,16 @@
 import pytest
 
 from conftest import TEXT_SVG, any_font
-from svg2pes.convert import plan_design, write_pes_file
-from svg2pes.svg_import import load_svg
+from stitchwright.convert import plan_design, write_pes_file
+from stitchwright.svg_import import load_svg
 
 
 # --- text -------------------------------------------------------------------
 
 
 def test_text_outlines_have_the_requested_height():
-    from svg2pes.geometry import bounds
-    from svg2pes.text import TextSpec, text_polylines
+    from stitchwright.geometry import bounds
+    from stitchwright.text import TextSpec, text_polylines
     name, path, idx = any_font()
     polys, missing = text_polylines(TextSpec("HI", path, name, idx, height_mm=12))
     x0, y0, x1, y1 = bounds([p for pl in polys for p in pl.points])
@@ -21,8 +21,8 @@ def test_text_outlines_have_the_requested_height():
 
 
 def test_text_two_lines_and_missing_characters():
-    from svg2pes.geometry import bounds
-    from svg2pes.text import TextSpec, text_polylines
+    from stitchwright.geometry import bounds
+    from stitchwright.text import TextSpec, text_polylines
     name, path, idx = any_font()
     one, _ = text_polylines(TextSpec("Ab", path, name, idx, 10))
     two, missing = text_polylines(TextSpec("Ab\nAb\u2603", path, name, idx, 10))
@@ -33,8 +33,8 @@ def test_text_two_lines_and_missing_characters():
 
 
 def test_text_converts_and_sews(tmp_path):
-    from svg2pes.svg_import import Design, DesignObject
-    from svg2pes.text import TextSpec, text_polylines
+    from stitchwright.svg_import import Design, DesignObject
+    from stitchwright.text import TextSpec, text_polylines
     name, path, idx = any_font()
     polys, _ = text_polylines(TextSpec("Sew", path, name, idx, 10))
     d = Design([DesignObject(1, "text1", "Text", (0, 0, 0), polys, color=(0, 0, 0))], [])
@@ -45,7 +45,7 @@ def test_text_converts_and_sews(tmp_path):
 
 
 def test_bad_font_is_a_clear_error(tmp_path):
-    from svg2pes.text import TextSpec, text_polylines
+    from stitchwright.text import TextSpec, text_polylines
     bad = tmp_path / "bad.ttf"
     bad.write_bytes(b"not a font")
     with pytest.raises(ValueError, match="Cannot read font"):
@@ -56,7 +56,7 @@ def test_bad_font_is_a_clear_error(tmp_path):
 
 
 def test_svg_text_is_stitched_with_the_matching_font(tmp_path):
-    from svg2pes.geometry import bounds
+    from stitchwright.geometry import bounds
     any_font()
     p = tmp_path / "t.svg"
     p.write_text(TEXT_SVG)
@@ -74,8 +74,8 @@ def test_svg_text_is_stitched_with_the_matching_font(tmp_path):
 
 
 def test_single_line_fonts_are_open_strokes():
-    from svg2pes.geometry import bounds
-    from svg2pes.text import TextSpec, installed_fonts, text_polylines
+    from stitchwright.geometry import bounds
+    from stitchwright.text import TextSpec, installed_fonts, text_polylines
     path, idx = installed_fonts()["Single-line Sans"]
     polys, missing = text_polylines(TextSpec("HELLO", path, "Single-line Sans", idx, 8))
     assert polys and not any(pl.closed for pl in polys) and missing == ""
@@ -84,8 +84,8 @@ def test_single_line_fonts_are_open_strokes():
 
 
 def test_monogram_and_arc_layouts():
-    from svg2pes.geometry import bounds
-    from svg2pes.text import TextSpec, text_polylines
+    from stitchwright.geometry import bounds
+    from stitchwright.text import TextSpec, text_polylines
     name, path, idx = any_font()
     mono, _ = text_polylines(TextSpec("ABC", path, name, idx, 10, monogram=True))
     _, y0, _, y1 = bounds([q for pl in mono for q in pl.points])

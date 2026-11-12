@@ -1,4 +1,4 @@
-# Build dist\svg2pes.exe (one file, no console window).
+# Build dist\stitchwright.exe (one file, no console window).
 # Run from the project folder in PowerShell:   .\build_exe.ps1
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
 #
@@ -7,8 +7,8 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-if (Get-Process svg2pes -ErrorAction SilentlyContinue) {
-    throw "svg2pes is running. Close it first: Windows will not let the build replace dist\svg2pes.exe while it is open."
+if (Get-Process stitchwright -ErrorAction SilentlyContinue) {
+    throw "stitchwright is running. Close it first: Windows will not let the build replace dist\stitchwright.exe while it is open."
 }
 
 if (-not (Test-Path ".venv-build\Scripts\python.exe")) {
@@ -26,8 +26,8 @@ Write-Host "Running tests..."
 if ($LASTEXITCODE -ne 0) { throw "tests failed - not building" }
 
 Write-Host "Building..."
-& $py -m PyInstaller --clean --noconfirm svg2pes.spec
+& $py -m PyInstaller --clean --noconfirm stitchwright.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
-$exe = Get-Item "dist\svg2pes.exe"
+$exe = Get-Item "dist\stitchwright.exe"
 Write-Host ("Built {0} ({1:N1} MB)" -f $exe.FullName, ($exe.Length / 1MB))

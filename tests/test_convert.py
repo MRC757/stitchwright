@@ -5,11 +5,11 @@ import pyembroidery
 import pytest
 
 from conftest import RED, SAMPLE, square, write_svg
-from svg2pes.cli import main
-from svg2pes.convert import ConversionError, convert, plan_design, write_pes_file
-from svg2pes.palette import brother_threads, nearest_brother, parse_color
-from svg2pes.stitching import Settings
-from svg2pes.svg_import import load_svg
+from stitchwright.cli import main
+from stitchwright.convert import ConversionError, convert, plan_design, write_pes_file
+from stitchwright.palette import brother_threads, nearest_brother, parse_color
+from stitchwright.stitching import Settings
+from stitchwright.svg_import import load_svg
 
 
 # --- palette (Thread Colors.pdf) --------------------------------------------
@@ -191,7 +191,7 @@ def test_nearest_brother_returns_chart_thread():
 # --- geometry (moving, resizing, rotating) ------------------------------------
 
 def test_transforms_compose_in_order():
-    from svg2pes.geometry import apply, chain, rotate, scale, translate
+    from stitchwright.geometry import apply, chain, rotate, scale, translate
     p = [(10.0, 0.0)]
     assert apply(rotate(90), p)[0] == pytest.approx((0.0, 10.0))       # clockwise on screen
     assert apply(rotate(90, 10, 10), p)[0] == pytest.approx((20.0, 10.0))
@@ -201,9 +201,9 @@ def test_transforms_compose_in_order():
 
 
 def test_placed_designs_are_not_moved_and_outside_is_reported(tmp_path):
-    from svg2pes.convert import outside_hoop
-    from svg2pes.geometry import apply, translate
-    from svg2pes.svg_import import Polyline
+    from stitchwright.convert import outside_hoop
+    from stitchwright.geometry import apply, translate
+    from stitchwright.svg_import import Polyline
     d = load_svg(SAMPLE)
     # the sample spans x 2..58, y 2..38: place it 25 mm right of the hoop centre
     for o in d.objects:
@@ -218,9 +218,9 @@ def test_placed_designs_are_not_moved_and_outside_is_reported(tmp_path):
 # --- hoop check from the planned stitches ---------------------------------------------
 
 def test_satin_reaching_past_the_margin_is_flagged():
-    from svg2pes.convert import outside_hoop
-    from svg2pes.fill import SatinSpec
-    from svg2pes.svg_import import Design, DesignObject
+    from stitchwright.convert import outside_hoop
+    from stitchwright.fill import SatinSpec
+    from stitchwright.svg_import import Design, DesignObject
     # 100 mm hoop, 2 mm margin: the sewing area ends at +-48 mm; the outline sits 1 mm inside
     def rect(satin):
         return DesignObject(1, "r", "Rect", (0, 0, 0), [square(-47, -30, 47, 30)],
@@ -250,8 +250,8 @@ def test_cli_path_refuses_or_shrinks_stitches_past_the_area(tmp_path):
 
 
 def test_choices_and_the_old_keywords_give_the_same_plan():
-    from svg2pes.convert import Choices
-    from svg2pes.fill import FillSpec
+    from stitchwright.convert import Choices
+    from stitchwright.fill import FillSpec
     d = load_svg(SAMPLE)
     c = Choices(overrides={"sun": "Red"}, skip=["wave"], fills={"star": None},
                 satins={"badge": 2.0}, fill_spec=FillSpec(angle=30))

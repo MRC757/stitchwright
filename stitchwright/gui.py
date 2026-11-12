@@ -1,7 +1,7 @@
-"""Desktop window for svg2pes: open an SVG, arrange objects, add text, choose
+"""The Stitchwright window: open an SVG, arrange objects, add text, choose
 Brother threads, preview the stitches and save PES.
 
-Run with:  python -m svg2pes gui [design.svg]   (or double-click svg2pes_gui.pyw)
+Run with:  python -m stitchwright gui [design.svg]   (or double-click stitchwright.pyw)
 
 Objects are placed in hoop coordinates: millimetres, hoop centre at (0, 0),
 y pointing down. Each object keeps its original outline plus a transform
@@ -35,11 +35,13 @@ from .palette import thread_for_rgb, to_hex
 from .pes_import import READ_EXTENSIONS, load_stitches
 from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
 from .project import EXTENSION as PROJECT_EXTENSION
+from .project import PROJECT_EXTENSIONS
 from .project import load_project, save_project
 from .stitching import Settings
 from .svg_import import DesignObject, load_svg
 
-TITLE = "svg2pes – SVG to Brother PES"
+TITLE = "Stitchwright"
+PROJECTS_LABEL = "Stitchwright projects"
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 HOOP_PRESETS = {                       # name -> (width, height) in mm
     "4 × 4 in (100 × 100 mm): PE540D": (100, 100),
@@ -608,8 +610,9 @@ class App:
         self.set_status(str(e), WARN_COLOUR)
 
     # ---------------------------------------------------------------- files
-    OPEN_TYPES = [("Designs", "*.svg *.svg2pes *.pes *.dst *.jef *.exp *.vp3 *.png *.jpg *.jpeg *.bmp *.gif"),
-                  ("SVG artwork", "*.svg"), ("svg2pes projects", "*.svg2pes"),
+    OPEN_TYPES = [("Designs", "*.svg *.stitchwright *.svg2pes *.pes *.dst *.jef *.exp *.vp3 "
+                               "*.png *.jpg *.jpeg *.bmp *.gif"),
+                  ("SVG artwork", "*.svg"), (PROJECTS_LABEL, "*.stitchwright *.svg2pes"),
                   ("Embroidery files", "*.pes *.dst *.jef *.exp *.vp3"),
                   ("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"), ("All files", "*.*")]
 
@@ -631,7 +634,7 @@ class App:
     def open(self, path: str):
         """Open a file as a new design: SVG, project, embroidery file or picture."""
         ext = os.path.splitext(path)[1].lower()
-        if ext == PROJECT_EXTENSION:
+        if ext in PROJECT_EXTENSIONS:              # .stitchwright, or .svg2pes from before
             self.open_project(path)
             return
         if ext in IMAGE_EXTENSIONS:
@@ -689,7 +692,7 @@ class App:
     def ask_import(self):
         path = filedialog.askopenfilename(parent=self.root, title="Import into this design",
                                           filetypes=[t for t in self.OPEN_TYPES
-                                                     if "svg2pes" not in t[0]])
+                                                     if t[0] != PROJECTS_LABEL])
         if path:
             self.import_file(path)
 
@@ -740,7 +743,7 @@ class App:
             path = filedialog.asksaveasfilename(
                 parent=self.root, title="Save project", defaultextension=PROJECT_EXTENSION,
                 initialfile=base + PROJECT_EXTENSION, initialdir=folder,
-                filetypes=[("svg2pes project", "*" + PROJECT_EXTENSION)])
+                filetypes=[("Stitchwright project", "*" + PROJECT_EXTENSION)])
             if not path:
                 return False
         try:
@@ -1772,7 +1775,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             import ctypes
             ctypes.windll.shcore.SetProcessDpiAwareness(1)        # crisp text on high-DPI screens
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("svg2pes")  # own taskbar icon
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("stitchwright")  # own taskbar icon
         except (AttributeError, OSError):
             pass
     root = tk.Tk()
@@ -1785,7 +1788,7 @@ def main(argv: list[str] | None = None) -> int:
     except tk.TclError:
         pass  # no icon is not worth failing over
     log_path = setup_logging()
-    log.info("svg2pes %s started", __version__)
+    log.info("Stitchwright %s started", __version__)
     app = App(root, argv[0] if argv else None)
     app.log_path = log_path
     root.report_callback_exception = app.on_exception

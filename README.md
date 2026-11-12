@@ -1,4 +1,4 @@
-# svg2pes
+# Stitchwright
 
 Turn artwork into Brother **.PES** embroidery files, with a desktop window for arranging the
 design, choosing threads, filling shapes, lettering and previewing the stitches.
@@ -7,7 +7,9 @@ Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). It reads SVG a
 pictures (PNG/JPEG) and existing embroidery files. It sews run-stitch outlines, satin columns
 and filled areas (tatami fill with underlay).
 
-![svg2pes window](docs/screenshot.png)
+Stitchwright was called *svg2pes* before version 0.2.1.
+
+![Stitchwright window](docs/screenshot.png)
 
 ## Features
 
@@ -44,7 +46,7 @@ and filled areas (tatami fill with underlay).
 - Copy, paste, duplicate, delete, group and ungroup, with undo and redo for everything.
 - Text in any installed font, or in built-in single-line fonts that stay clean at small
   sizes. Text can be bent along an arc or laid out as a three-letter monogram.
-- Project files (`.svg2pes`) save the whole layout so you can come back to it.
+- Project files (`.stitchwright`) save the whole layout so you can come back to it.
 - Hoop presets and a millimetres/inches switch.
 
 **Checking**
@@ -58,7 +60,7 @@ same conversion code. See [Future features](#future-features) for what's planned
 
 ## Windows app (.exe)
 
-`svg2pes.exe` is a single file that runs without Python installed. Double-click it, or drag
+`stitchwright.exe` is a single file that runs without Python installed. Double-click it, or drag
 a design onto it to open it straight away. The first launch takes a few seconds while it
 unpacks.
 
@@ -67,7 +69,7 @@ To build it yourself, run this in PowerShell from the project folder (close the 
     .\build_exe.ps1
 
 The script creates its own build environment (`.venv-build`), runs the tests, and writes
-`dist\svg2pes.exe`. If PowerShell blocks scripts, run
+`dist\stitchwright.exe`. If PowerShell blocks scripts, run
 `powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`. Unsigned PyInstaller apps sometimes
 trigger a Windows SmartScreen or antivirus warning. If so, choose *More info → Run anyway*.
 
@@ -76,20 +78,20 @@ trigger a Windows SmartScreen or antivirus warning. If so, choose *More info →
 Needs Python 3.10 or newer. Tkinter, which the window uses, comes with Python on Windows and
 macOS.
 
-    git clone https://github.com/MRC757/svg2pes.git
-    cd svg2pes
+    git clone https://github.com/MRC757/stitchwright.git
+    cd stitchwright
     pip install .
-    svg2pes-gui                           # the window (or double-click svg2pes_gui.pyw)
-    svg2pes --help                        # the command line
+    stitchwright-gui                 # the window (or double-click stitchwright.pyw)
+    stitchwright --help              # the command line
 
 For working on the code, install it editable with the test tools:
 `pip install -e ".[dev]"`. Running from the folder without installing also works:
-`pip install -r requirements.txt`, then `python -m svg2pes gui`.
+`pip install -r requirements.txt`, then `python -m stitchwright gui`.
 
 ## Using the window
 
 ### Getting artwork in
-- **File → Open…** (Ctrl+O) starts a new design from an SVG, a project (`.svg2pes`), an
+- **File → Open…** (Ctrl+O) starts a new design from an SVG, a project (`.stitchwright`), an
   embroidery file (PES, DST, JEF, EXP, VP3) or a picture. The design is centred in the hoop
   and shrunk if it is too big.
 - **File → Import into this design…** (Ctrl+I) adds another file's objects to the current
@@ -163,17 +165,18 @@ The preview is drawn from the stitches that will be saved, not from the artwork.
   - *Stop at colour changes* pauses at each thread change and names the next thread.
 
 ### Saving
-- **Save project** (Ctrl+Shift+S) saves everything to a `.svg2pes` file: outlines,
+- **Save project** (Ctrl+Shift+S) saves everything to a `.stitchwright` file: outlines,
   positions, threads, fills, text, groups, sewing order and settings. Open it again with
-  File → Open. The window asks before closing or opening over unsaved changes.
+  File → Open. The window asks before closing or opening over unsaved changes. Projects
+  saved by svg2pes (`.svg2pes` files) open too.
 - **Save PES…** (Ctrl+S) writes the file for the machine and suggests a short name without
   spaces for the USB stick.
 
 ## Using the command line
 
-    python -m svg2pes list design.svg            # objects, ids, colours and nearest threads
-    python -m svg2pes palette                    # the 61 Brother threads
-    python -m svg2pes convert design.svg -o design.pes --preview design.png \
+    python -m stitchwright list design.svg     # objects, ids, colours and nearest threads
+    python -m stitchwright palette             # the 61 Brother threads
+    python -m stitchwright convert design.svg -o design.pes --preview design.png \
         --set sun=brother:205 --fill wing1 --fill wing2=Yellow --satin border=2.5
 
 | Option | Meaning |
@@ -250,8 +253,8 @@ yet. Sew a test piece before using them on a real project.
 
 ## If something goes wrong
 
-The window writes a log to `%LOCALAPPDATA%\svg2pes\svg2pes.log` (on macOS and Linux,
-`~/.svg2pes/svg2pes.log`): the files opened and saved, and the details of any unexpected
+The window writes a log to `%LOCALAPPDATA%\stitchwright\stitchwright.log` (on macOS and Linux,
+`~/.stitchwright/stitchwright.log`): the files opened and saved, and the details of any unexpected
 error, which is also shown in a dialog. **Help → Open log folder** opens it; include the log
 when reporting a problem.
 
@@ -274,7 +277,7 @@ Finished items are ticked.
 - [ ] **Travel stitches between objects** of the same colour, not only within a fill.
 
 ### Designing and editing
-- [x] **Project files** (`.svg2pes`).
+- [x] **Project files** (`.stitchwright`).
 - [x] **Open PES files** (and DST, JEF, EXP, VP3) to view, simulate or recolour them.
 - [x] **Copy, paste and duplicate**, **mirror/flip**, **align and distribute**,
       **group/ungroup**.
@@ -306,7 +309,7 @@ Finished items are ticked.
       the `.exe` on version tags.
 - [x] **Tests for editing** (arranging, groups, copy/paste, undo), through the `Document`
       model with no window.
-- [x] **Installable package:** `pip install .` gives `svg2pes` and `svg2pes-gui` commands.
+- [x] **Installable package:** `pip install .` gives `stitchwright` and `stitchwright-gui` commands.
 - [ ] **Tests for mouse interaction** in the window (dragging, handles, box selection).
 - [ ] **Installer and code signing** for the Windows app, so SmartScreen doesn't warn.
 - [ ] **macOS and Linux builds.**
@@ -315,25 +318,25 @@ Finished items are ticked.
 
 | Path | What it does |
 | --- | --- |
-| `svg2pes/svg_import.py` | reads SVG into objects made of polylines, in mm (shapes and text) |
-| `svg2pes/image_import.py` | traces pictures into thread-colour shapes |
-| `svg2pes/pes_import.py` | reads existing embroidery files as objects of exact stitches |
-| `svg2pes/palette.py` | the 61 Brother threads and colour parsing |
-| `svg2pes/fill.py` | fill (tatami, underlay, pull compensation, cut-outs, travel) and satin |
-| `svg2pes/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
-| `svg2pes/convert.py` | sizing, colour choices, stitch planning, time estimate, PES writing |
-| `svg2pes/text.py` | text with installed and single-line fonts, arcs, monograms |
-| `svg2pes/geometry.py` | transforms and shared polyline helpers (simplify, smooth, ...) |
-| `svg2pes/project.py` | `.svg2pes` project files |
-| `svg2pes/preview.py` | the stitch preview (whole hoop or zoomed) and the sew-out |
-| `svg2pes/document.py` | the design being edited and every operation on it (no window) |
-| `svg2pes/gui.py` | the Tkinter window: draws the design and turns clicks into `Document` calls |
-| `svg2pes/dialogs.py` | the window's dialogs (threads, text, fill and outline, pictures) |
-| `svg2pes/log.py` | the log file |
-| `svg2pes/cli.py` | the command line |
-| `svg2pes/assets/` | app icon |
+| `stitchwright/svg_import.py` | reads SVG into objects made of polylines, in mm (shapes and text) |
+| `stitchwright/image_import.py` | traces pictures into thread-colour shapes |
+| `stitchwright/pes_import.py` | reads existing embroidery files as objects of exact stitches |
+| `stitchwright/palette.py` | the 61 Brother threads and colour parsing |
+| `stitchwright/fill.py` | fill (tatami, underlay, pull compensation, cut-outs, travel) and satin |
+| `stitchwright/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
+| `stitchwright/convert.py` | sizing, colour choices, stitch planning, time estimate, PES writing |
+| `stitchwright/text.py` | text with installed and single-line fonts, arcs, monograms |
+| `stitchwright/geometry.py` | transforms and shared polyline helpers (simplify, smooth, ...) |
+| `stitchwright/project.py` | `.stitchwright` project files |
+| `stitchwright/preview.py` | the stitch preview (whole hoop or zoomed) and the sew-out |
+| `stitchwright/document.py` | the design being edited and every operation on it (no window) |
+| `stitchwright/gui.py` | the Tkinter window: draws the design and turns clicks into `Document` calls |
+| `stitchwright/dialogs.py` | the window's dialogs (threads, text, fill and outline, pictures) |
+| `stitchwright/log.py` | the log file |
+| `stitchwright/cli.py` | the command line |
+| `stitchwright/assets/` | app icon |
 | `pyproject.toml` | package metadata and dependencies |
-| `svg2pes.spec`, `build_exe.ps1`, `version_info.txt` | Windows .exe build |
+| `stitchwright.spec`, `build_exe.ps1`, `version_info.txt` | Windows .exe build |
 | `.github/workflows/ci.yml` | tests on every push, the `.exe` on version tags |
 | `CHANGELOG.md` | what changed in each version |
 

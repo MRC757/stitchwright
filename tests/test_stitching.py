@@ -5,9 +5,9 @@ import pyembroidery
 import pytest
 
 from conftest import SAMPLE, square, stitch_lengths, write_svg
-from svg2pes.convert import ConversionError, convert, plan_design
-from svg2pes.stitching import Run, Settings, resample, stitch_points
-from svg2pes.svg_import import load_svg
+from stitchwright.convert import ConversionError, convert, plan_design
+from stitchwright.stitching import Run, Settings, resample, stitch_points
+from stitchwright.svg_import import load_svg
 
 
 # --- stitching --------------------------------------------------------------
@@ -44,7 +44,7 @@ def test_tie_stitches_lock_both_ends():
 
 
 def test_fill_covers_a_rectangle_with_rows():
-    from svg2pes.fill import FillSpec, fill_paths
+    from stitchwright.fill import FillSpec, fill_paths
     paths = fill_paths([square(0, 0, 20, 10)], FillSpec(angle=0, spacing=0.5, stitch_len=3.5,
                                                         underlay=False, pull_comp=0))
     assert len(paths) == 1                                   # convex: one serpentine run
@@ -57,7 +57,7 @@ def test_fill_covers_a_rectangle_with_rows():
 
 
 def test_fill_leaves_holes_empty_and_follows_the_angle():
-    from svg2pes.fill import FillSpec, fill_paths
+    from stitchwright.fill import FillSpec, fill_paths
     ring = [square(0, 0, 20, 20), square(6, 6, 14, 14)]
     paths = fill_paths(ring, FillSpec(angle=30, spacing=0.4, underlay=False))
     pts = [p for path in paths for p in path]
@@ -67,7 +67,7 @@ def test_fill_leaves_holes_empty_and_follows_the_angle():
 
 
 def test_fills_sew_before_outlines_and_share_a_block(tmp_path):
-    from svg2pes.svg_import import Design, DesignObject
+    from stitchwright.svg_import import Design, DesignObject
     a = DesignObject(1, "a", "Rect", (255, 0, 0), [square(-20, -10, 0, 10)], color=(255, 0, 0))
     b = DesignObject(2, "b", "Rect", (0, 0, 255), [square(5, -10, 25, 10)], color=(0, 0, 255))
     d = Design([a, b], [])
@@ -95,7 +95,7 @@ def test_open_shapes_cannot_be_filled(tmp_path):
 # --- sewing quality ---------------------------------------------------------------
 
 def test_underlay_comes_first_and_pull_comp_widens():
-    from svg2pes.fill import FillSpec, fill_paths
+    from stitchwright.fill import FillSpec, fill_paths
     sq = [square(0, 0, 20, 10)]
     plain = fill_paths(sq, FillSpec(angle=0, underlay=False, pull_comp=0))
     under = fill_paths(sq, FillSpec(angle=0, underlay=True, pull_comp=0))
@@ -110,13 +110,13 @@ def test_underlay_comes_first_and_pull_comp_widens():
 
 
 def test_fill_under_a_stacked_shape_is_cut_out():
-    from svg2pes.svg_import import DesignObject
-    from svg2pes.fill import FillSpec
+    from stitchwright.svg_import import DesignObject
+    from stitchwright.fill import FillSpec
     lower = DesignObject(1, "low", "Rect", (255, 0, 0), [square(0, 0, 30, 30)], color=(255, 0, 0),
                          fill=FillSpec(underlay=False))
     upper = DesignObject(2, "up", "Rect", (0, 0, 255), [square(10, 10, 20, 20)], color=(0, 0, 255),
                          fill=FillSpec(underlay=False))
-    from svg2pes.stitching import Settings, plan_blocks
+    from stitchwright.stitching import Settings, plan_blocks
     blocks = plan_blocks([lower, upper], Settings())
     low_pts = [p for b in blocks for r in b.runs if r.object_id == "low" and r.fill for p in r.points]
     inside = [p for p in low_pts if 10.5 < p[0] < 19.5 and 10.5 < p[1] < 19.5]
@@ -127,8 +127,8 @@ def test_fill_under_a_stacked_shape_is_cut_out():
 
 
 def test_travel_joins_fill_pieces_instead_of_jumping():
-    from svg2pes.fill import FillSpec, fill_paths
-    from svg2pes.svg_import import Polyline
+    from stitchwright.fill import FillSpec, fill_paths
+    from stitchwright.svg_import import Polyline
     # a U shape: the rows split into two arms, which travel along the edge joins up
     u = Polyline([(0, 0), (9, 0), (9, 9), (6, 9), (6, 3), (3, 3), (3, 9), (0, 9), (0, 0)], True)
     spec = FillSpec(angle=0, underlay=False, pull_comp=0)
@@ -139,7 +139,7 @@ def test_travel_joins_fill_pieces_instead_of_jumping():
 
 
 def test_satin_column_has_the_right_width_and_underlay():
-    from svg2pes.fill import SatinSpec, satin_path
+    from stitchwright.fill import SatinSpec, satin_path
     pts = satin_path([(0, 0), (20, 0)], False, SatinSpec(width=3, underlay=True, pull_comp=0))
     ys = [p[1] for p in pts]
     assert max(ys) == pytest.approx(1.5) and min(ys) == pytest.approx(-1.5)
@@ -151,9 +151,9 @@ def test_satin_column_has_the_right_width_and_underlay():
 
 
 def test_satin_outline_and_colour_order_in_a_plan(tmp_path):
-    from svg2pes.fill import SatinSpec
-    from svg2pes.stitching import Settings
-    from svg2pes.svg_import import Design, DesignObject
+    from stitchwright.fill import SatinSpec
+    from stitchwright.stitching import Settings
+    from stitchwright.svg_import import Design, DesignObject
     a = DesignObject(1, "a", "Rect", (255, 0, 0), [square(-20, -10, 0, 10)], color=(255, 0, 0),
                      satin=SatinSpec(width=2))
     b = DesignObject(2, "b", "Rect", (0, 0, 255), [square(5, -10, 25, 10)], color=(0, 0, 255))
@@ -166,7 +166,7 @@ def test_satin_outline_and_colour_order_in_a_plan(tmp_path):
 
 
 def test_time_estimate():
-    from svg2pes.convert import estimate_minutes, format_minutes
+    from stitchwright.convert import estimate_minutes, format_minutes
     sew, change = estimate_minutes(5525, 0, 3, spm=650)
     assert sew == pytest.approx(10.0) and change == 3.0
     assert format_minutes(0.5) == "under a minute" and format_minutes(75) == "1 h 15 min"
@@ -179,7 +179,7 @@ def test_time_estimate():
 # --- stitch preview and sew-out ----------------------------------------------
 
 def test_track_follows_the_sewing_order():
-    from svg2pes.preview import CHANGE, SEW, Track
+    from stitchwright.preview import CHANGE, SEW, Track
     plan = plan_design(load_svg(SAMPLE))
     t = Track(plan.pattern)
     assert t.total_stitches == plan.report.stitch_count
@@ -191,7 +191,7 @@ def test_track_follows_the_sewing_order():
 
 
 def test_render_view_zoomed_and_partly_sewn():
-    from svg2pes.preview import BACKGROUND, GHOST, Style, Track, View, render_view
+    from stitchwright.preview import BACKGROUND, GHOST, Style, Track, View, render_view
     plan = plan_design(load_svg(SAMPLE))
     t = Track(plan.pattern)
     whole = View(-50, -50, 4, 400, 400)
@@ -208,7 +208,7 @@ def test_render_view_zoomed_and_partly_sewn():
 
 def test_curves_get_shorter_stitches_straight_runs_do_not():
     import numpy as np
-    from svg2pes.geometry import simplify
+    from stitchwright.geometry import simplify
     # a 12 mm circle, sampled and simplified the way SVG outlines are
     circle = [(6 * math.cos(t), 6 * math.sin(t)) for t in np.linspace(0, 2 * math.pi, 95)]
     pts = resample(np.array(simplify(circle, 0.05)), 2.5, 35, 0.4)
@@ -221,9 +221,9 @@ def test_curves_get_shorter_stitches_straight_runs_do_not():
 
 
 def test_travel_runs_inside_the_fill_when_no_outline_covers_it():
-    from svg2pes.fill import FillSpec, closed_rings, fill_paths
-    from svg2pes.geometry import segment_distance
-    from svg2pes.svg_import import Polyline
+    from stitchwright.fill import FillSpec, closed_rings, fill_paths
+    from stitchwright.geometry import segment_distance
+    from stitchwright.svg_import import Polyline
     u = Polyline([(0, 0), (9, 0), (9, 9), (6, 9), (6, 3), (3, 3), (3, 9), (0, 9), (0, 0)], True)
     ring = closed_rings([u])[0]
     spec = FillSpec(angle=0, spacing=0.4, underlay=False, pull_comp=0)

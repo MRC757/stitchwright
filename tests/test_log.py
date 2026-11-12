@@ -1,9 +1,9 @@
-from svg2pes.log import RepeatGuard, log, setup_logging
+from stitchwright.log import RepeatGuard, log, setup_logging
 
 
 def test_setup_logging_writes_to_the_given_folder(tmp_path):
     path = setup_logging(str(tmp_path / "logs"))
-    assert path == str(tmp_path / "logs" / "svg2pes.log")
+    assert path == str(tmp_path / "logs" / "stitchwright.log")
     log.info("hello from the test")
     for h in log.handlers:
         h.flush()
@@ -26,7 +26,7 @@ def test_repeat_guard_stops_dialog_storms():
 def test_errors_in_window_handlers_are_logged_and_reported(tmp_path, monkeypatch, tk_root, window):
     import tkinter as tk
     from tkinter import messagebox
-    from svg2pes import gui
+    from stitchwright import gui
 
     path = setup_logging(str(tmp_path))
     shown = []

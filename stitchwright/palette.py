@@ -143,7 +143,7 @@ def parse_color(text: str) -> RGB:
                 if int(getattr(t, field)) == int(num):
                     return t.rgb
             what = "thread numbered" if field == "number" else "chart row"
-            raise ValueError(f"No Brother {what} {num!r} (see 'svg2pes palette')")
+            raise ValueError(f"No Brother {what} {num!r} (see 'stitchwright palette')")
     h = low.lstrip("#")
     if len(h) == 3 and all(c in "0123456789abcdef" for c in h):
         h = "".join(c * 2 for c in h)

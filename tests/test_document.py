@@ -2,12 +2,12 @@
 import pytest
 
 from conftest import SAMPLE, any_font
-from svg2pes.document import DocError, Document
-from svg2pes.fill import FillSpec, SatinSpec
-from svg2pes.project import load_project, save_project
-from svg2pes.stitching import Settings
-from svg2pes.svg_import import load_svg
-from svg2pes.text import TextSpec
+from stitchwright.document import DocError, Document
+from stitchwright.fill import FillSpec, SatinSpec
+from stitchwright.project import load_project, save_project
+from stitchwright.stitching import Settings
+from stitchwright.svg_import import load_svg
+from stitchwright.text import TextSpec
 
 
 @pytest.fixture
@@ -158,7 +158,7 @@ def test_project_round_trip_through_the_document(doc, tmp_path):
     doc.group(["sun", "star"])
     doc.rotate(["sun"], 15)
     before = doc.plan(Settings()).plan.report.stitch_count
-    path = str(tmp_path / "d.svg2pes")
+    path = str(tmp_path / "d.stitchwright")
     save_project(path, doc.to_project({"margin": "3"}))
     other = Document()
     settings = other.load_project(load_project(path), path)
