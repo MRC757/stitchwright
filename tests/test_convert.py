@@ -215,6 +215,19 @@ def test_placed_designs_are_not_moved_and_outside_is_reported(tmp_path):
     assert outside_hoop(d, (120, 100), 2) == []
 
 
+def test_cli_refuses_a_zero_machine_speed_without_a_traceback(tmp_path, capsys):
+    assert main(["convert", SAMPLE, "-o", str(tmp_path / "o.pes"), "--speed", "0"]) == 2
+    assert "Machine speed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("pull", [-1.0, 5.0])
+def test_pull_compensation_outside_0_to_1_mm_is_refused(pull):
+    from stitchwright.fill import FillSpec
+    with pytest.raises(ConversionError, match="Pull compensation"):
+        plan_design(load_svg(SAMPLE), fills={"star": None}, fill_spec=FillSpec(pull_comp=pull),
+                    fit=True)
+
+
 def test_long_imported_stitches_are_warned_about():
     from stitchwright.svg_import import Design, DesignObject, Polyline
 

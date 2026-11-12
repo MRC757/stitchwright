@@ -202,6 +202,9 @@ def _check_inputs(hoop_mm, margin_mm, width_mm, s: Settings) -> None:
                               f"got {s.stitch_len:g} mm")
     if s.min_stitch >= s.stitch_len:
         raise ConversionError("Minimum stitch length must be shorter than the stitch length")
+    if s.machine_spm < 1:
+        raise ConversionError(f"Machine speed must be at least 1 stitch per minute, "
+                              f"got {s.machine_spm:g}")
 
 
 def build_pattern(blocks: list[ColorBlock], s: Settings) -> EmbPattern:
@@ -291,6 +294,8 @@ def plan_design(design: Design, choices: Choices | None = None, *,
                 raise ConversionError(f"Fill row spacing must be 0.2-3 mm ({o.obj_id})")
             if not 1 <= o.fill.stitch_len <= MAX_STITCH_LEN:
                 raise ConversionError(f"Fill stitch length must be 1-{MAX_STITCH_LEN:g} mm ({o.obj_id})")
+            if not 0 <= o.fill.pull_comp <= 1:
+                raise ConversionError(f"Pull compensation must be 0-1 mm ({o.obj_id})")
     chosen = snap_colors(design, snap)
     if not snap:
         warnings.append("Colours not snapped: the machine will show the nearest Brother "
