@@ -384,11 +384,16 @@ def convert(svg_path: str, out_path: str, *,
             fills: dict[str, str | None] | None = None,
             no_outline: list[str] | None = None,
             fill_spec: FillSpec | None = None,
-            satins: dict[str, float] | None = None) -> Report:
+            satins: dict[str, float] | None = None,
+            svg_dpi: float | None = None) -> Report:
     """Load an SVG, plan it and write a PES file (what the CLI uses)."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
-    plan = plan_design(load_svg(svg_path), overrides=overrides, color_map=color_map, skip=skip,
+    design = load_svg(svg_path)
+    if svg_dpi:                       # e.g. 72 for Illustrator exports: SVG assumes 96
+        _scale_design(design, 96.0 / svg_dpi)
+        design.warnings = [w for w in design.warnings if "72 dpi" not in w]
+    plan = plan_design(design, overrides=overrides, color_map=color_map, skip=skip,
                        width_mm=width_mm, fit=fit, hoop_mm=hoop_mm, margin_mm=margin_mm,
                        settings=s, snap=snap, fills=fills, no_outline=no_outline,
                        fill_spec=fill_spec, satins=satins)

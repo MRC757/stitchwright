@@ -37,6 +37,13 @@ from .text import TextSpec, default_font, installed_fonts, text_polylines
 
 TITLE = "svg2pes – SVG to Brother PES"
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
+HOOP_PRESETS = {                       # name -> (width, height) in mm
+    "4 × 4 in (100 × 100 mm): PE540D": (100, 100),
+    "5 × 7 in (130 × 180 mm)": (130, 180),
+    "6 × 10 in (160 × 260 mm)": (160, 260),
+    "8 × 8 in (200 × 200 mm)": (200, 200),
+    "8 × 12 in (200 × 300 mm)": (200, 300),
+}
 OK_COLOUR, WARN_COLOUR, ERROR_COLOUR = "#2e7d32", "#9a6700", "#c62828"
 SELECT_COLOUR = "#1a73e8"
 SHIFT, CONTROL = 0x0001, 0x0004
@@ -654,6 +661,8 @@ class App:
         self.v_knockout = tk.BooleanVar(value=True)
         self.v_spm = tk.StringVar(value="650")
         self.v_pes = tk.StringVar(value="1")
+        self.v_units = tk.StringVar(value="mm")
+        self.v_preset = tk.StringVar(value=next(iter(HOOP_PRESETS)))
         self.v_jumps = tk.BooleanVar(value=True)
         self.v_dots = tk.BooleanVar(value=True)
         # zoom / pan: zoom 1 = whole hoop fits; view_c = hoop mm shown at the canvas centre
@@ -777,7 +786,8 @@ class App:
         tabs.add(f_arr, text=" Arrange ")
         self.l_target = ttk.Label(f_arr, text="Everything", font=("Segoe UI", 9, "bold"))
         self.l_target.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
-        ttk.Label(f_arr, text="Size (mm)").grid(row=1, column=0, sticky="w")
+        self.l_size = ttk.Label(f_arr, text="Size (mm)")
+        self.l_size.grid(row=1, column=0, sticky="w")
         sf = ttk.Frame(f_arr)
         sf.grid(row=1, column=1, columnspan=3, sticky="w", pady=2)
         self.e_w = ttk.Entry(sf, textvariable=self.v_w, **num)
@@ -786,7 +796,8 @@ class App:
         self.e_h = ttk.Entry(sf, textvariable=self.v_h, **num)
         self.e_h.pack(side="left")
         ttk.Checkbutton(sf, text="Keep proportions", variable=self.v_ratio).pack(side="left", padx=8)
-        ttk.Label(f_arr, text="Position (mm)").grid(row=2, column=0, sticky="w")
+        self.l_pos = ttk.Label(f_arr, text="Position (mm)")
+        self.l_pos.grid(row=2, column=0, sticky="w")
         pf = ttk.Frame(f_arr)
         pf.grid(row=2, column=1, columnspan=3, sticky="w", pady=2)
         ttk.Label(pf, text="X").pack(side="left")
@@ -839,7 +850,10 @@ class App:
         ttk.Entry(hf, textvariable=self.v_hoop_w, **num).pack(side="left")
         ttk.Label(hf, text=" × ").pack(side="left")
         ttk.Entry(hf, textvariable=self.v_hoop_h, **num).pack(side="left")
-        ttk.Label(f_set, text="PE540D: 100 × 100", **grey).grid(row=0, column=2, sticky="w", padx=6)
+        cb = ttk.Combobox(f_set, textvariable=self.v_preset, state="readonly", width=26,
+                          values=list(HOOP_PRESETS) + ["Custom"])
+        cb.grid(row=0, column=2, sticky="w", padx=6)
+        cb.bind("<<ComboboxSelected>>", lambda e: self._pick_hoop())
         ttk.Label(f_set, text="Margin (mm)").grid(row=1, column=0, sticky="w")
         ttk.Entry(f_set, textvariable=self.v_margin, **num).grid(row=1, column=1, sticky="w", pady=2)
         ttk.Label(f_set, text="kept clear inside the hoop", **grey).grid(row=1, column=2, sticky="w", padx=6)
@@ -1025,10 +1039,25 @@ class App:
         self.m_view.add_command(label="Zoom out", accelerator="-", command=lambda: self.zoom_step(1 / 1.5))
         self.m_view.add_command(label="Fit hoop", accelerator="0", command=self.zoom_fit)
         self.m_view.add_separator()
+        self.m_view.add_radiobutton(label="Millimetres", variable=self.v_units, value="mm",
+                                    command=self.set_units)
+        self.m_view.add_radiobutton(label="Inches", variable=self.v_units, value="in",
+                                    command=self.set_units)
+        self.m_view.add_separator()
         self.m_view.add_command(label="Sew-out: play / pause", command=self.sim_toggle)
         bar.add_cascade(label="View", menu=self.m_view)
         self.root.configure(menu=bar)
         self.menubar = bar
+
+    def _pick_hoop(self):
+        size = HOOP_PRESETS.get(self.v_preset.get())
+        if size:
+            self.v_hoop_w.set(f"{size[0]:g}")
+            self.v_hoop_h.set(f"{size[1]:g}")
+            self.zoom_fit()
+            if size != (100, 100):
+                self.set_status("The PE540D sews only in its 4 × 4 in (100 × 100 mm) hoop; larger "
+                                "hoops are for other machines.", WARN_COLOUR)
 
     def _main_key(self, event, fn, text_ok: bool = True):
         """Run a shortcut only in the main window, and (unless text_ok) not while
@@ -1162,6 +1191,7 @@ class App:
             messagebox.showerror(TITLE, "No stitchable shapes were found in this file.\n\n"
                                  + "\n".join(sorted(set(design.warnings))), parent=self.root)
             return
+        self._fix_dpi(design)
         self._start_design(design, path)
 
     def _clear_design(self):
@@ -1186,6 +1216,20 @@ class App:
         limits = [a / d for a, d in ((aw, x1 - x0), (ah, y1 - y0)) if d > 0]
         s = min([1.0] + limits)
         return chain(translate(-(x0 + x1) / 2, -(y0 + y1) / 2), scale(s)), s
+
+    def _fix_dpi(self, design) -> None:
+        """Offer to scale an Illustrator (72 dpi) export up to its intended size."""
+        if not getattr(design, "dpi_hint", None):
+            return
+        design.warnings = [w for w in design.warnings if "72 dpi" not in w]
+        if messagebox.askyesno(TITLE, "This SVG looks like an Adobe Illustrator export. "
+                               "Illustrator measures at 72 dpi, so the design would come out "
+                               "25% smaller than drawn.\n\nScale it up to 133% (its intended "
+                               "size)?", parent=self.root):
+            k = 96.0 / design.dpi_hint
+            for o in design.objects:
+                o.polylines = [Polyline([(x * k, y * k) for x, y in pl.points], pl.closed)
+                               for pl in o.polylines]
 
     def _start_design(self, design, path: str):
         try:
@@ -1247,6 +1291,7 @@ class App:
         if not design.objects:
             self.set_status("Nothing stitchable was found in that file.", WARN_COLOUR)
             return
+        self._fix_dpi(design)
         self.add_objects(design.objects, keep_place=any(o.stitches for o in design.objects),
                          texts=design.texts)
         if self.svg_path is None:
@@ -1848,8 +1893,23 @@ class App:
             self.mats[i] = chain(self.mats[i], m)
         self.refresh()
 
+    # lengths are kept in mm; the Arrange fields and readouts show the chosen units
     def _fmt(self, v: float) -> str:
-        return f"{v:.1f}"
+        return f"{v / 25.4:.2f}" if self.v_units.get() == "in" else f"{v:.1f}"
+
+    def _len_text(self, v: float) -> str:
+        return f"{v / 25.4:.2f} in" if self.v_units.get() == "in" else f"{v:.1f} mm"
+
+    def _len(self, var: tk.StringVar, label: str):
+        v = self._num(var, label)
+        return None if v is None else (v * 25.4 if self.v_units.get() == "in" else v)
+
+    def set_units(self):
+        u = self.v_units.get()
+        self.l_size.configure(text=f"Size ({u})")
+        self.l_pos.configure(text=f"Position ({u})")
+        self.update_arrange_fields()
+        self.refresh()
 
     def update_arrange_fields(self):
         sel = self.selection()
@@ -1881,7 +1941,7 @@ class App:
         b = self.target_bounds()
         if not b or (self.v_w.get() == self._shown.get("w") and self.v_h.get() == self._shown.get("h")):
             return
-        w, h = self._num(self.v_w, "Width"), self._num(self.v_h, "Height")
+        w, h = self._len(self.v_w, "Width"), self._len(self.v_h, "Height")
         if w is None or h is None:
             return
         if w <= 0 or h <= 0:
@@ -1903,7 +1963,7 @@ class App:
         b = self.target_bounds()
         if not b or (self.v_x.get() == self._shown.get("x") and self.v_y.get() == self._shown.get("y")):
             return
-        x, y = self._num(self.v_x, "X"), self._num(self.v_y, "Y")
+        x, y = self._len(self.v_x, "X"), self._len(self.v_y, "Y")
         if x is None or y is None:
             return
         x0, y0, x1, y1 = b
@@ -2071,7 +2131,7 @@ class App:
         if d["mode"] == "move":
             mx, my = (e.x - sx) / self.px, (e.y - sy) / self.px
             m = translate(mx, my)
-            msg = f"Move {mx:+.1f}, {my:+.1f} mm"
+            msg = f"Move {self._len_text(mx)} across, {self._len_text(my)} down"
         elif d["mode"] == "scale":
             r0 = math.dist((sx, sy), (ccx, ccy))
             k = max(0.05, math.dist((e.x, e.y), (ccx, ccy)) / r0) if r0 > 2 else 1.0
@@ -2198,7 +2258,8 @@ class App:
             return
         rep = plan.report
         self.l_info.configure(
-            text=f"{rep.width_mm:.1f} × {rep.height_mm:.1f} mm  ·  {rep.stitch_count} stitches"
+            text=f"{self._len_text(rep.width_mm)[:-3]} × {self._len_text(rep.height_mm)}"
+                 f"  ·  {rep.stitch_count} stitches"
                  f"  ·  {rep.color_blocks} colours  ·  about {format_minutes(rep.total_minutes)}")
         if self.outside:
             self.b_save.configure(state="disabled")

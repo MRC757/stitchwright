@@ -7,6 +7,7 @@ the shape has one, otherwise its fill colour).
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from xml.etree import ElementTree
@@ -52,6 +53,7 @@ class Design:
     objects: list[DesignObject]
     warnings: list[str]
     texts: dict = field(default_factory=dict)    # obj_id -> TextSpec, for SVG <text>
+    dpi_hint: int | None = None                  # 72 if it looks like a 72 dpi export
 
     def active(self) -> list[DesignObject]:
         return [o for o in self.objects if not o.skipped and o.polylines]
@@ -159,7 +161,27 @@ def load_svg(path: str) -> Design:
 
     if not objects:
         warnings.append("No stitchable shapes found in the SVG")
-    return Design(objects, warnings, texts)
+    dpi = _dpi_hint(path)
+    if dpi:
+        warnings.append("This SVG looks like an Adobe Illustrator export, which measures at "
+                        "72 dpi: the design may come out 25% smaller than drawn. Scale it to "
+                        "133% (or use --svg-dpi 72) if so.")
+    return Design(objects, warnings, texts, dpi)
+
+
+def _dpi_hint(path: str) -> int | None:
+    """72 when the file is an Illustrator export sized in px (or unitless), which
+    Illustrator means at 72 per inch while SVG means 96."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4096).decode("utf-8", "ignore")
+    except OSError:
+        return None
+    if "Adobe Illustrator" not in head:
+        return None
+    m = re.search(r"<svg[^>]*?\swidth\s*=\s*[\"']\s*([0-9.]+)\s*([a-z%]*)", head, re.I | re.S)
+    unit = (m.group(2) if m else "").lower()
+    return 72 if unit in ("", "px") else None
 
 
 def _unique_id(base: str, own_id, seen_ids: set, all_ids: set) -> str:

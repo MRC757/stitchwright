@@ -82,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="don't cut fills out under filled shapes stacked above")
     p.add_argument("--satin", action="append", metavar="OBJECT[=WIDTH]",
                    help="sew this outline as a satin column, WIDTH mm (default 2); repeatable")
+    p.add_argument("--svg-dpi", type=float, metavar="DPI",
+                   help="the SVG's own px per inch, e.g. 72 for Illustrator exports (default 96)")
     p.add_argument("--speed", type=int, default=650,
                    help="machine speed in stitches per minute, for the time estimate (default 650)")
     p.add_argument("--width", type=float, metavar="MM", help="scale the design to this width in mm")
@@ -126,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             fills=_fills(a.fill), no_outline=a.no_outline,
             fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch,
                                underlay=not a.no_underlay, pull_comp=a.pull_comp),
-            satins=_satins(a.satin))
+            satins=_satins(a.satin), svg_dpi=a.svg_dpi)
     except OSError as e:
         print(f"error: {e.strerror or e}: {e.filename or ''}".rstrip(": "), file=sys.stderr)
         return 2

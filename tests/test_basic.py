@@ -657,3 +657,15 @@ def test_picture_is_traced_into_coloured_shapes(tmp_path):
     assert (x1 - x0) == pytest.approx(40.5, abs=1.5)              # 81 of 200 px at 100 mm
     blue = next(o for o in objs if o.source_color[2] > 150)
     assert all(pl.closed for pl in blue.polylines)
+
+
+def test_illustrator_72dpi_exports_are_spotted_and_scaled(tmp_path):
+    p = tmp_path / "ai.svg"
+    p.write_text('<?xml version="1.0"?>\n<!-- Generator: Adobe Illustrator 27.0.0 -->\n'
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="144px" height="72px" '
+                 'viewBox="0 0 144 72"><rect width="144" height="72" fill="none" stroke="#000"/></svg>')
+    d = load_svg(str(p))
+    assert d.dpi_hint == 72 and any("72 dpi" in w for w in d.warnings)
+    rep = convert(str(p), str(tmp_path / "o.pes"), svg_dpi=72)
+    assert rep.width_mm == pytest.approx(50.8, abs=0.2)          # 2 inches
+    assert load_svg(SAMPLE).dpi_hint is None                     # sized in mm: fine
