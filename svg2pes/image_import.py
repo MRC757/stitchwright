@@ -75,6 +75,20 @@ def reduce_colours(path: str, s: TraceSettings):
     idx = np.empty(len(flat), dtype=np.int32)
     for i in range(0, len(flat), 50000):               # assign in chunks to keep memory small
         idx[i:i + 50000] = ((flat[i:i + 50000, None, :] - centres[None]) ** 2).sum(-1).argmin(1)
+    # Colours covering under 2% of the design are usually just the soft edges between
+    # areas (anti-aliasing): give their pixels to the nearest real colour.
+    counts = np.bincount(idx, minlength=len(centres))
+    bg_guess = Counter(np.concatenate([idx.reshape(h, w)[0], idx.reshape(h, w)[-1],
+                                       idx.reshape(h, w)[:, 0], idx.reshape(h, w)[:, -1]]).tolist()
+                       ).most_common(1)[0][0] if s.drop_background else None
+    fg_total = counts.sum() - (counts[bg_guess] if bg_guess is not None else 0)
+    keep = [j for j in range(len(centres))
+            if j == bg_guess or counts[j] >= 0.02 * max(fg_total, 1)]
+    if len(keep) < len(centres):
+        kc = centres[keep]
+        for i in range(0, len(flat), 50000):
+            idx[i:i + 50000] = np.array(keep)[((flat[i:i + 50000, None, :] - kc[None]) ** 2)
+                                              .sum(-1).argmin(1)]
     idx = idx.reshape(h, w)
     palette = [tuple(int(round(v)) for v in c) for c in centres]
     background = None
