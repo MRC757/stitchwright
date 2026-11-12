@@ -31,13 +31,42 @@ def test_resample_keeps_ends_and_spacing():
     assert all(math.dist(a, b) == pytest.approx(2.5) for a, b in zip(pts, pts[1:]))
 
 
-def test_tie_stitches_lock_both_ends():
+def _points(seq):
+    """Expected points, for comparing a list of (x, y) tuples with ==."""
+    return [pytest.approx(p, abs=1e-9) for p in seq]
+
+
+def test_tie_stitches_lock_both_ends_without_reusing_a_hole():
+    from itertools import combinations
     run = Run([(0.0, 0.0), (10.0, 0.0)], False, "x")
-    pts = stitch_points(run, Settings(lock_len=0.5, lock_passes=2))
-    assert pts[:4] == [(0, 0), (0.5, 0), (0, 0), (0.5, 0)]
-    assert pts[-4:] == [pytest.approx((9.5, 0)), pytest.approx((10, 0)),
-                        pytest.approx((9.5, 0)), pytest.approx((10, 0))]
-    assert stitch_points(run, Settings(lock_len=0))[0] == (0, 0)
+    pts = stitch_points(run, Settings(lock_len=1.0, min_stitch=0.4))
+    assert pts[:4] == _points([(0, 0), (1, 0), (0.4, 0), (1.4, 0)])       # out, back, on
+    assert pts[4:-4] == _points([(2.5, 0), (5, 0), (7.5, 0)])            # the run itself
+    assert pts[-4:] == _points([(8.6, 0), (9.6, 0), (9, 0), (10, 0)])    # mirrored tie-off
+    for tie in (pts[:4], pts[-4:]):
+        assert min(math.dist(p, q) for p, q in combinations(tie, 2)) >= 0.4 - 1e-9
+    assert min(math.dist(p, q) for p, q in zip(pts, pts[1:])) >= 0.4 - 1e-9
+    assert stitch_points(run, Settings(lock_len=0)) == _points([(0, 0), (2.5, 0), (5, 0),
+                                                                (7.5, 0), (10, 0)])
+
+
+def test_tie_stitches_follow_the_line_and_fit_short_runs():
+    s = Settings(lock_len=1.0, min_stitch=0.4)
+    # round a corner: the tie's drops lie on the line, not on a straight extension of it
+    bent = stitch_points(Run([(0.0, 0.0), (0.5, 0.0), (0.5, 5.0)], False, "x"), s)
+    assert bent[:4] == _points([(0, 0), (0.5, 0.5), (0.4, 0), (0.5, 0.9)])
+    # too short for two ties: tie-in only, and the run still ends where it ends
+    short = stitch_points(Run([(0.0, 0.0), (2.0, 0.0)], False, "x"), s)
+    assert short[:4] == _points([(0, 0), (1, 0), (0.4, 0), (1.4, 0)])
+    assert short[-1] == (2, 0) and len(short) == 5
+    # too short for any tie: sewn as it is
+    assert stitch_points(Run([(0.0, 0.0), (1.0, 0.0)], False, "x"), s) == [(0, 0), (1, 0)]
+    # a hairpin at the start (a fill sliver): a tie there would put drops 0.3 mm apart,
+    # so that end gets none; the far end still gets its tie-off
+    fold = stitch_points(Run([(0.0, 0.0), (0.6, 0.0), (0.0, 0.5), (10.0, 0.5)], False, "x"), s)
+    assert fold[:3] == _points([(0, 0), (0.6, 0), (0, 0.5)])
+    assert fold[-4:] == _points([(8.6, 0.5), (9.6, 0.5), (9, 0.5), (10, 0.5)])
+    assert min(math.dist(p, q) for p, q in zip(fold, fold[1:])) >= 0.4 - 1e-9
 
 
 # --- fill stitching -------------------------------------------------------------
@@ -239,6 +268,46 @@ def test_travel_joins_fill_pieces_instead_of_jumping():
     assert len(paths) == 1                         # joined by travel stitches
     pts = paths[0]
     assert max(math.dist(a, b) for a, b in zip(pts, pts[1:])) <= 3.9 + 1e-6
+
+
+def test_travel_is_stitched_like_a_run_not_copied_from_a_dense_outline():
+    """A font's or a traced picture's outline has a point every 0.2 mm or so; travel
+    along it must still be sewn with proper stitches, not one per outline point."""
+    from stitchwright.fill import FillSpec, fill_paths
+    from stitchwright.geometry import subdivide
+    from stitchwright.svg_import import Polyline
+    corners = [(0, 0), (9, 0), (9, 9), (6, 9), (6, 3), (3, 3), (3, 9), (0, 9), (0, 0)]
+    dense = [corners[0]]
+    for a, b in zip(corners, corners[1:]):
+        dense += subdivide(a, b, 0.2)
+    paths = fill_paths([Polyline(dense, True)], FillSpec(angle=0, underlay=False, pull_comp=0),
+                       min_len=0.4)
+    assert len(paths) == 1
+    steps = [math.dist(a, b) for a, b in zip(paths[0], paths[0][1:])]
+    assert min(steps) >= 0.4 - 1e-9
+    assert max(steps) <= 3.9 + 1e-6
+
+
+def test_filled_lettering_has_no_tiny_stitches(tmp_path):
+    """The whole way to the file: a filled shape with a dense outline (as text has) sews
+    no stitch under the 0.4 mm minimum, ties included."""
+    from stitchwright.geometry import subdivide
+    corners = [(10, 10), (28, 10), (28, 28), (22, 28), (22, 16), (16, 16), (16, 28), (10, 28)]
+    dense = [corners[0]]
+    for a, b in zip(corners, corners[1:] + corners[:1]):
+        dense += subdivide(a, b, 0.2)
+    d = "M" + " L".join(f"{x:.3f} {y:.3f}" for x, y in dense) + " Z"
+    svg = write_svg(tmp_path, f'<path id="u" d="{d}" fill="#f00" stroke="#f00"/>')
+    out = str(tmp_path / "o.pes")
+    convert(svg, out, fills={"u": None})
+    pattern = pyembroidery.read_pes(out)
+    assert min(stitch_lengths(pattern)) >= 0.3          # 0.4 mm, less 0.1 mm rounding
+    last, zero = None, 0
+    for x, y, c in pattern.stitches:
+        if c & 0xFF == pyembroidery.STITCH:
+            zero += last == (x, y)
+            last = (x, y)
+    assert zero == 0, f"{zero} stitches of zero length"
 
 
 def test_satin_column_has_the_right_width_and_underlay():

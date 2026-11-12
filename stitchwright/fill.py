@@ -26,7 +26,7 @@ import bisect
 import math
 from dataclasses import dataclass
 
-from .geometry import drop_close, point_in_polygon, subdivide, winding_number
+from .geometry import drop_close, point_in_polygon, resample, subdivide, winding_number
 
 Point = tuple[float, float]
 RGB = tuple[int, int, int]
@@ -202,7 +202,8 @@ def _serpentine(rows, L: float, min_len: float, stagger: bool = True) -> list[li
                     break
                 r, j, rightward = r + 1, best[1], not rightward
             paths.append(drop_close(path, min_len))
-    return [p for p in paths if len(p) >= 2]
+    # a piece that is one row shorter than a stitch would sew as a too-short stitch
+    return [p for p in paths if len(p) > 2 or (len(p) == 2 and math.dist(p[0], p[1]) >= min_len)]
 
 
 def _unrotate(paths, cs):
@@ -249,9 +250,13 @@ def _ring_between(ring, s0, s1):
     return [p for _, p in pts]
 
 
-def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0) -> list[list[Point]]:
+def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0,
+                min_len: float = 0.4) -> list[list[Point]]:
     """Join consecutive paths whose ends lie near the same ring with stitches
-    along that ring, instead of a jump. Paths that can't be joined stay separate."""
+    along that ring, instead of a jump. Paths that can't be joined stay separate.
+    The travel is stitched like a run stitch (L apart, shorter on curves, never
+    under min_len), not point for point along the ring: an outline from a font or
+    a traced picture has a point every 0.2 mm or so."""
     if not paths:
         return []
     out = [list(paths[0])]
@@ -266,11 +271,12 @@ def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0) -> list[list
             length = sum(math.dist(p, q) for p, q in zip([a] + route, route + [b]))
             if length > MAX_TRAVEL_MM:
                 continue
-            here = a
+            way = [a]
             for p in route + [b]:
-                if math.dist(here, p) > 1e-6:
-                    out[-1].extend(subdivide(here, p, L))
-                    here = p
+                if math.dist(way[-1], p) > 1e-6:
+                    way.append(p)
+            if len(way) > 1:
+                out[-1].extend(resample(way, L, TRAVEL_CORNER_DEG, min_len)[1:])
             out[-1].extend(nxt[1:])
             joined = True
             break
@@ -281,6 +287,7 @@ def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0) -> list[list
 
 # --------------------------------------------------------------------- public
 TRAVEL_INSET_MM = 0.3   # travel stitches sit this far inside a fill that has no outline
+TRAVEL_CORNER_DEG = 35  # travel always drops the needle on turns sharper than this
 
 
 def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
@@ -303,7 +310,7 @@ def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
     rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp, rule=rule)
     paths += _unrotate(_serpentine(rows, spec.stitch_len, min_len), cs)
     travel = rings if hidden else [inset_ring(r, rings, TRAVEL_INSET_MM, rule) for r in rings]
-    return travel_join(paths, travel, L=2.5)
+    return travel_join(paths, travel, L=2.5, min_len=min_len)
 
 
 def _inside_fill(p, rings, rule: str = NONZERO) -> bool:

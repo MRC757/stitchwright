@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 Affine = tuple[float, float, float, float, float, float]
 Point = tuple[float, float]
 
@@ -122,6 +124,77 @@ def subdivide(a: Point, b: Point, max_len: float) -> list[Point]:
     d = math.dist(a, b)
     n = max(1, math.ceil(d / max_len))
     return [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(1, n + 1)]
+
+
+CURVE_MIN_STITCH = 1.0      # mm, the shortest stitch used on tight curves
+
+
+def resample(points: np.ndarray, spacing: float, corner_deg: float,
+             min_len: float = 0.0, curve_turn_deg: float = 11.0) -> list[Point]:
+    """Place needle drops along a line: spacing apart on straight runs, closer on
+    curves (each stitch turning at most curve_turn_deg; 0 = even spacing), always
+    on sharp corners, and never closer together than min_len."""
+    points = np.asarray(points, dtype=float)
+    n = len(points)
+    anchors = [0]
+    for i in range(1, n - 1):
+        v1 = points[i] - points[i - 1]
+        v2 = points[i + 1] - points[i]
+        l1, l2 = np.hypot(*v1), np.hypot(*v2)
+        if l1 < 1e-9 or l2 < 1e-9:
+            continue
+        cosang = float(np.dot(v1, v2) / (l1 * l2))
+        turn = math.degrees(math.acos(max(-1.0, min(1.0, cosang))))
+        if turn > corner_deg:
+            anchors.append(i)
+    anchors.append(n - 1)
+
+    out: list[Point] = [tuple(points[0])]
+    for a, b in zip(anchors[:-1], anchors[1:]):
+        seg = points[a:b + 1]
+        d = np.hypot(*np.diff(seg, axis=0).T)
+        cum = np.concatenate([[0.0], np.cumsum(d)])
+        total = cum[-1]
+        if total < 1e-9:
+            continue
+        targets = _curve_targets(seg, d, cum, spacing, curve_turn_deg,
+                                 max(2 * min_len, CURVE_MIN_STITCH))
+        xs = np.interp(targets, cum, seg[:, 0])
+        ys = np.interp(targets, cum, seg[:, 1])
+        out.extend(zip(xs.tolist(), ys.tolist()))
+    return drop_close(out, min_len)
+
+
+def _curve_targets(seg, d, cum, spacing: float, turn_deg: float, shortest: float):
+    """Distances along one corner-to-corner span where needle points go: stitch_len
+    apart on straight runs, shorter where the line curves (so each stitch turns at
+    most turn_deg), never below `shortest`. The steps are then stretched slightly so
+    the last one lands exactly on the span's end. A straight span gets exactly the
+    old even spacing."""
+    total = float(cum[-1])
+    n = len(seg)
+    # curvature (degrees per mm) at each vertex: its turn over the length around it
+    kappa = np.zeros(n)
+    for i in range(1, n - 1):
+        v1, v2 = seg[i] - seg[i - 1], seg[i + 1] - seg[i]
+        l1, l2 = d[i - 1], d[i]
+        if l1 < 1e-9 or l2 < 1e-9:
+            continue
+        c = float(np.dot(v1, v2) / (l1 * l2))
+        kappa[i] = math.degrees(math.acos(max(-1.0, min(1.0, c)))) / ((l1 + l2) / 2)
+    if n > 2:
+        kappa[0], kappa[-1] = kappa[1], kappa[-2]
+    if turn_deg <= 0 or not kappa.any():
+        k = max(1, math.ceil(total / spacing))
+        return np.linspace(total / k, total, k)
+    steps, s = [], 0.0
+    while s < total - 1e-9:
+        kv = float(np.interp(s, cum, kappa))
+        step = spacing if kv <= 1e-9 else min(spacing, max(shortest, turn_deg / kv))
+        steps.append(step)
+        s += step
+    steps = np.array(steps) * (total / s)                   # land exactly on the end
+    return np.cumsum(steps)
 
 
 def segment_distance(p: Point, a: Point, b: Point) -> float:

@@ -7,13 +7,13 @@ sewn exactly as they are.
 """
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass, field, replace
-
-import numpy as np
+from itertools import combinations
 
 from .fill import closed_rings, fill_paths, satin_path
-from .geometry import drop_close, simplify
+from .geometry import resample, simplify
 from .svg_import import DesignObject, Point
 
 RGB = tuple[int, int, int]
@@ -27,8 +27,7 @@ class Settings:
     curve_turn_deg: float = 11.0  # on curves, each stitch turns at most this (0 = even)
     trim_dist: float = 8.0      # mm, jumps longer than this are trimmed
     min_stitch: float = 0.4     # mm, shorter needle drops are merged (avoids thread breaks)
-    lock_len: float = 0.5       # mm, tie-in / tie-off stitch length (0 = off)
-    lock_passes: int = 2        # back-and-forth passes per tie-in / tie-off
+    lock_len: float = 1.0       # mm, tie-in / tie-off stitch length (0 = off); see stitch_points
     min_run: float = 0.6        # mm, outlines shorter than this are dropped
     keep_order: bool = False    # True = keep SVG paint order instead of grouping by colour
     knockout: bool = True       # leave out fill under filled shapes stacked above
@@ -60,76 +59,6 @@ class Run:
 class ColorBlock:
     color: RGB
     runs: list[Run] = field(default_factory=list)
-
-
-def resample(points: np.ndarray, spacing: float, corner_deg: float,
-             min_len: float = 0.0, curve_turn_deg: float = 11.0) -> list[Point]:
-    """Place needle drops along a line: spacing apart on straight runs, closer on
-    curves (each stitch turning at most curve_turn_deg; 0 = even spacing), always
-    on sharp corners, and never closer together than min_len."""
-    n = len(points)
-    anchors = [0]
-    for i in range(1, n - 1):
-        v1 = points[i] - points[i - 1]
-        v2 = points[i + 1] - points[i]
-        l1, l2 = np.hypot(*v1), np.hypot(*v2)
-        if l1 < 1e-9 or l2 < 1e-9:
-            continue
-        cosang = float(np.dot(v1, v2) / (l1 * l2))
-        turn = math.degrees(math.acos(max(-1.0, min(1.0, cosang))))
-        if turn > corner_deg:
-            anchors.append(i)
-    anchors.append(n - 1)
-
-    out: list[Point] = [tuple(points[0])]
-    for a, b in zip(anchors[:-1], anchors[1:]):
-        seg = points[a:b + 1]
-        d = np.hypot(*np.diff(seg, axis=0).T)
-        cum = np.concatenate([[0.0], np.cumsum(d)])
-        total = cum[-1]
-        if total < 1e-9:
-            continue
-        targets = _curve_targets(seg, d, cum, spacing, curve_turn_deg,
-                                 max(2 * min_len, CURVE_MIN_STITCH))
-        xs = np.interp(targets, cum, seg[:, 0])
-        ys = np.interp(targets, cum, seg[:, 1])
-        out.extend(zip(xs.tolist(), ys.tolist()))
-    return drop_close(out, min_len)
-
-
-CURVE_MIN_STITCH = 1.0      # mm, the shortest stitch used on tight curves
-
-
-def _curve_targets(seg, d, cum, spacing: float, turn_deg: float, shortest: float):
-    """Distances along one corner-to-corner span where needle points go: stitch_len
-    apart on straight runs, shorter where the line curves (so each stitch turns at
-    most turn_deg), never below `shortest`. The steps are then stretched slightly so
-    the last one lands exactly on the span's end. A straight span gets exactly the
-    old even spacing."""
-    total = float(cum[-1])
-    n = len(seg)
-    # curvature (degrees per mm) at each vertex: its turn over the length around it
-    kappa = np.zeros(n)
-    for i in range(1, n - 1):
-        v1, v2 = seg[i] - seg[i - 1], seg[i + 1] - seg[i]
-        l1, l2 = d[i - 1], d[i]
-        if l1 < 1e-9 or l2 < 1e-9:
-            continue
-        c = float(np.dot(v1, v2) / (l1 * l2))
-        kappa[i] = math.degrees(math.acos(max(-1.0, min(1.0, c)))) / ((l1 + l2) / 2)
-    if n > 2:
-        kappa[0], kappa[-1] = kappa[1], kappa[-2]
-    if turn_deg <= 0 or not kappa.any():
-        k = max(1, math.ceil(total / spacing))
-        return np.linspace(total / k, total, k)
-    steps, s = [], 0.0
-    while s < total - 1e-9:
-        kv = float(np.interp(s, cum, kappa))
-        step = spacing if kv <= 1e-9 else min(spacing, max(shortest, turn_deg / kv))
-        steps.append(step)
-        s += step
-    steps = np.array(steps) * (total / s)                   # land exactly on the end
-    return np.cumsum(steps)
 
 
 def _path_length(pts: list[Point]) -> float:
@@ -295,31 +224,55 @@ def plan_blocks(objects: list[DesignObject], s: Settings) -> list[ColorBlock]:
     return blocks
 
 
+TIE_STEPS = (1.0, 0.4, 1.4)     # a tie's needle drops, as multiples of lock_len along the line
+
+
 def stitch_points(run: Run, s: Settings) -> list[Point]:
     """Needle drops for one run, including tie-in and tie-off stitches.
 
-    Each tie is `lock_passes` back-and-forth stitches of up to `lock_len`
-    along the first / last stitch, so they sit on the line being sewn."""
+    A tie is four needle drops along the line being sewn, at 0, 1.0, 0.4 and 1.4
+    times `lock_len` from its end (1.0 mm out, 0.6 mm back, 1.0 mm on again at the
+    default length): the reversal locks the thread, and no two drops share a hole,
+    which short back-and-forth ties in the same two holes do, cutting the thread.
+    A run too short for both ties gets only the tie-in; a very short one, none; and
+    an end where the line doubles back within the tie (a fill sliver) gets none."""
     if run.kind == "stitches":                  # imported: sew exactly as given
         return list(run.points)
     if run.prestitched:
         pts = list(run.points)
     else:
-        pts = resample(np.asarray(run.points), s.stitch_len, s.corner_deg, s.min_stitch,
-                       s.curve_turn_deg)
-    if s.lock_len <= 0 or s.lock_passes <= 0 or len(pts) < 2:
+        pts = resample(run.points, s.stitch_len, s.corner_deg, s.min_stitch, s.curve_turn_deg)
+    if s.lock_len <= 0 or len(pts) < 2:
         return pts
+    reach = TIE_STEPS[-1] * s.lock_len + s.min_stitch       # length one tie takes up
+    total = _path_length(pts)
+    if total >= 2 * reach:
+        return _tie_in(_tie_in(pts, s)[::-1], s)[::-1]      # the tie-off is a mirrored tie-in
+    if total >= reach:
+        return _tie_in(pts, s)
+    return pts
 
-    def toward(a: Point, b: Point) -> Point:
-        d = math.dist(a, b)
-        if d < 1e-9:
-            return a
-        t = min(s.lock_len, d) / d
+
+def _tie_in(pts: list[Point], s: Settings) -> list[Point]:
+    """pts with a tie-in at its start (see stitch_points): the tie's drops are placed
+    along the line, and the line then continues from the first of its own drops that
+    lies at least a minimum stitch beyond the tie, along the line and as the needle moves."""
+    cum = [0.0]
+    for a, b in zip(pts, pts[1:]):
+        cum.append(cum[-1] + math.dist(a, b))
+
+    def at(dist: float) -> Point:
+        i = min(bisect.bisect_right(cum, dist), len(pts) - 1)
+        a, b = pts[i - 1], pts[i]
+        seg = cum[i] - cum[i - 1]
+        t = 0.0 if seg <= 0 else (dist - cum[i - 1]) / seg
         return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
 
-    p0, pn = pts[0], pts[-1]
-    a = toward(p0, pts[1])
-    b = toward(pn, pts[-2])
-    tie_in = [p0, a] * s.lock_passes            # p0 a p0 a ... then on to pts[1]
-    tie_out = [b, pn] * s.lock_passes           # ... pn b pn b pn
-    return tie_in + pts[1:] + tie_out
+    tie = [pts[0]] + [at(k * s.lock_len) for k in TIE_STEPS]
+    k = min(bisect.bisect_right(cum, TIE_STEPS[-1] * s.lock_len + s.min_stitch), len(pts) - 1)
+    while k < len(pts) - 1 and math.dist(tie[-1], pts[k]) < s.min_stitch:
+        k += 1
+    head = tie + [pts[k]]
+    if any(math.dist(p, q) < s.min_stitch - 1e-6 for p, q in combinations(head, 2)):
+        return pts        # the line doubles back on itself within the tie: no tie here
+    return tie + pts[k:]

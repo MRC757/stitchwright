@@ -5,6 +5,16 @@
 Fixes from a code review. Tested in code and in the preview; not yet sewn on the PE540D.
 
 ### Stitches
+- **No more tiny stitches at the start of a design or inside fills.** Two causes, found when
+  the PE540D shredded the thread in the first stitches of filled lettering:
+  - The travel stitches that join a fill's pieces followed the shape's outline point for
+    point. A font's or a traced picture's outline has a point every 0.2 mm or so, so each
+    travel was a run of 0.2 mm stitches, nearly in the same hole, sewn at full speed. Travel is
+    now stitched like a run stitch (2.5 mm, shorter on curves, never under 0.4 mm). The filled
+    "MEC" test design drops from 3,037 stitches to 1,439, with no stitch under 0.4 mm.
+  - The tie-in and tie-off at each end of every run were 0.5 mm back and forth in the same
+    two holes. A tie is now 1.0 mm out, 0.6 mm back and 1.0 mm on along the line, so no two
+    needle drops share a hole. Runs too short for a tie are sewn without one.
 - **Fills follow SVG's fill rule.** Where two parts of one shape overlap and are drawn the
   same way, the overlap is now filled instead of left as a hole, as SVG and fonts mean it
   (some fonts, such as Bahnschrift, draw many letters this way). A shape marked

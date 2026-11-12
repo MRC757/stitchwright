@@ -30,14 +30,17 @@ Stitchwright was called *svg2pes* before version 0.2.1.
 
 **Stitches**
 - Run-stitch outlines with tie-in and tie-off stitches, shorter stitches on tight curves (so
-  small circles sew round, not as polygons), and no stitch shorter than 0.4 mm.
+  small circles sew round, not as polygons), and no stitch shorter than 0.4 mm. A tie is
+  three stitches along the line (1.0 mm out, 0.6 mm back, 1.0 mm on) so that no two needle
+  drops share a hole.
 - Satin columns for borders, of any width from 0.5 to 8 mm, with a centre-walk underlay.
 - Fill (tatami) for closed shapes:
   - you choose the angle, density and stitch length
   - underlay and pull compensation help it lie flat
   - fill hidden under shapes stacked on top is cut out (the fill below still runs 0.4 mm
     under the shape on top, so no fabric shows between them)
-  - separate pieces are joined by travel stitches instead of jumps
+  - separate pieces are joined by travel stitches instead of jumps (sewn like a run stitch
+    along the edge, under the outline)
   - overlapping parts of one shape are filled as drawn (SVG's `nonzero` rule, which fonts use
     too); a shape marked `fill-rule="evenodd"` gets holes where its parts overlap. Holes
     such as the middle of an "o" stay empty either way.
