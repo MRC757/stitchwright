@@ -80,9 +80,7 @@ def reduce_colours(path: str, s: TraceSettings):
     # Colours covering under 2% of the design are usually just the soft edges between
     # areas (anti-aliasing): give their pixels to the nearest real colour.
     counts = np.bincount(idx, minlength=len(centres))
-    bg_guess = Counter(np.concatenate([idx.reshape(h, w)[0], idx.reshape(h, w)[-1],
-                                       idx.reshape(h, w)[:, 0], idx.reshape(h, w)[:, -1]]).tolist()
-                       ).most_common(1)[0][0] if s.drop_background else None
+    bg_guess = _edge_colour(idx.reshape(h, w)) if s.drop_background else None
     fg_total = counts.sum() - (counts[bg_guess] if bg_guess is not None else 0)
     keep = [j for j in range(len(centres))
             if j == bg_guess or counts[j] >= 0.02 * max(fg_total, 1)]
@@ -93,11 +91,15 @@ def reduce_colours(path: str, s: TraceSettings):
                                               .sum(-1).argmin(1)]
     idx = idx.reshape(h, w)
     palette = [tuple(int(round(v)) for v in c) for c in centres]
-    background = None
-    if s.drop_background:
-        border = np.concatenate([idx[0], idx[-1], idx[:, 0], idx[:, -1]])
-        background = Counter(border.tolist()).most_common(1)[0][0]
+    # asked again: merging the small colours can make another colour the commonest at the edge
+    background = _edge_colour(idx) if s.drop_background else None
     return idx, palette, background
+
+
+def _edge_colour(idx: np.ndarray) -> int:
+    """The colour index most common along the picture's edges (H x W index array)."""
+    border = np.concatenate([idx[0], idx[-1], idx[:, 0], idx[:, -1]])
+    return Counter(border.tolist()).most_common(1)[0][0]
 
 
 def preview(path: str, s: TraceSettings) -> Image.Image:
