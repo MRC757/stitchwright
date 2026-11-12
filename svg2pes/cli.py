@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .convert import ConversionError, Settings, convert, describe_objects
+from .convert import ConversionError, Settings, convert, describe_objects, format_minutes
 from .fill import FillSpec
 from .palette import brother_threads, to_hex
 from .svg_import import load_svg
@@ -25,6 +25,17 @@ def _fills(items: list[str] | None) -> dict[str, str | None]:
     for it in items or []:
         k, _, v = it.partition("=")
         out[k.strip()] = v.strip() or None
+    return out
+
+
+def _satins(items: list[str] | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for it in items or []:
+        k, _, v = it.partition("=")
+        try:
+            out[k.strip()] = float(v) if v.strip() else 2.0
+        except ValueError:
+            raise SystemExit(f"--satin expects OBJECT or OBJECT=WIDTH, got {it!r}")
     return out
 
 
@@ -64,6 +75,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fill-spacing", type=float, default=0.4,
                    help="mm between fill rows, smaller is denser (default 0.4)")
     p.add_argument("--fill-stitch", type=float, default=3.5, help="fill stitch length in mm (default 3.5)")
+    p.add_argument("--no-underlay", action="store_true", help="fills without underlay")
+    p.add_argument("--pull-comp", type=float, default=0.2,
+                   help="mm added to each end of fill rows (default 0.2)")
+    p.add_argument("--no-cutout", action="store_true",
+                   help="don't cut fills out under filled shapes stacked above")
+    p.add_argument("--satin", action="append", metavar="OBJECT[=WIDTH]",
+                   help="sew this outline as a satin column, WIDTH mm (default 2); repeatable")
+    p.add_argument("--speed", type=int, default=650,
+                   help="machine speed in stitches per minute, for the time estimate (default 650)")
     p.add_argument("--width", type=float, metavar="MM", help="scale the design to this width in mm")
     p.add_argument("--fit", action="store_true", help="scale down to fit the hoop if too big")
     p.add_argument("--hoop", type=_hoop, default=(100.0, 100.0), help="hoop size in mm (default 100x100 for PE540D)")
@@ -100,10 +120,13 @@ def main(argv: list[str] | None = None) -> int:
             a.svg, a.out,
             overrides=_pairs(a.set, "--set"), color_map=_pairs(a.map, "--map"), skip=a.skip,
             width_mm=a.width, fit=a.fit, hoop_mm=a.hoop, margin_mm=a.margin,
-            settings=Settings(stitch_len=a.stitch_len, keep_order=a.keep_order),
+            settings=Settings(stitch_len=a.stitch_len, keep_order=a.keep_order,
+                              knockout=not a.no_cutout, machine_spm=a.speed),
             pes_version=a.pes_version, snap=not a.no_snap, preview_path=a.preview,
             fills=_fills(a.fill), no_outline=a.no_outline,
-            fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch))
+            fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch,
+                               underlay=not a.no_underlay, pull_comp=a.pull_comp),
+            satins=_satins(a.satin))
     except OSError as e:
         print(f"error: {e.strerror or e}: {e.filename or ''}".rstrip(": "), file=sys.stderr)
         return 2
@@ -115,10 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {rep.stitch_count} stitches, {rep.jump_count} jumps, {rep.trim_count} trims, "
           f"{rep.color_blocks} colour blocks")
     print(f"  size {rep.width_mm:.1f} x {rep.height_mm:.1f} mm (scale {rep.scale:.2f})")
+    print(f"  time about {format_minutes(rep.total_minutes)} "
+          f"({format_minutes(rep.sew_minutes)} sewing + {format_minutes(rep.change_minutes)} "
+          f"for thread changes, at {a.speed} stitches/min)")
     for i, tu in enumerate(rep.thread_map, 1):
         picked = ", ".join(to_hex(c) for c in tu.chosen)
         what = f"Brother {tu.thread.number} {tu.thread.name}" if tu.thread else f"custom {to_hex(tu.rgb)}"
-        print(f"  colour {i}: {what:<28} from {picked}   [{', '.join(tu.object_ids)}]")
+        print(f"  colour {i}: {what:<28} {tu.stitches:>6} stitches  from {picked}   "
+              f"[{', '.join(tu.object_ids)}]")
     for w in sorted(set(rep.warnings)):
         print("warning:", w)
     return 0

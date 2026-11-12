@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from xml.etree import ElementTree
 
 if TYPE_CHECKING:
-    from .fill import FillSpec
+    from .fill import FillSpec, SatinSpec
 
 from svgelements import SVG, Close, Path, Shape
 
@@ -37,7 +37,9 @@ class DesignObject:
     color: tuple[int, int, int] = (0, 0, 0)  # colour actually used (operator may change it)
     skipped: bool = False
     fill: "FillSpec | None" = None           # fill the inside of this (closed) shape
-    outline: bool = True                     # sew the outline as a run stitch
+    outline: bool = True                     # sew the outline
+    satin: "SatinSpec | None" = None         # sew the outline as a satin column, not a run
+    stitches: bool = False                   # polylines are exact needle points (imported PES)
 
     def bounds(self) -> tuple[float, float, float, float]:
         xs = [p[0] for pl in self.polylines for p in pl.points]

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import replace
 import re
 import sys
 import tkinter as tk
@@ -19,13 +20,14 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from .convert import ConversionError, Plan, outside_hoop, plan_design, write_pes_file
+from .convert import (ConversionError, Plan, format_minutes, outside_hoop, plan_design,
+                      write_pes_file)
 from .geometry import IDENTITY, Affine, apply, bounds, chain, rotate, scale, translate
 from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
 from .preview import CHANGE, OUTSIDE, Style, Track, View, draw_track, render_view
 from .stitching import Settings
 from .svg_import import Design, DesignObject, Polyline, load_svg
-from .fill import FillSpec, can_fill
+from .fill import FillSpec, SatinSpec, can_fill
 from .text import TextSpec, default_font, installed_fonts, text_polylines
 
 TITLE = "svg2pes – SVG to Brother PES"
@@ -310,34 +312,51 @@ class TextDialog(tk.Toplevel):
 
 
 class FillDialog(tk.Toplevel):
-    """Modal dialog for an object's fill. After wait(), .result is None (cancelled)
-    or (FillSpec or None for no fill, sew_outline: bool)."""
+    """Modal dialog for an object's fill and outline stitches. After wait(),
+    .result is None (cancelled) or a dict with keys fill (FillSpec or None),
+    outline (bool) and satin (SatinSpec or None)."""
 
     def __init__(self, parent, ui: float, title: str, spec: FillSpec | None, outline: bool,
-                 outline_rgb):
+                 outline_rgb, satin: SatinSpec | None = None, can_fill_shape: bool = True):
         super().__init__(parent)
         self.title(title)
         self.transient(parent)
         self.resizable(False, False)
         self.ui = ui
         self.result = None
+        self.can_fill_shape = can_fill_shape
         base = spec or FillSpec()
         self.other_rgb = base.color or outline_rgb
-        self.v_on = tk.BooleanVar(value=True)
+        # ticked if it already has a fill, or if it is a closed shape not yet given a satin border
+        self.v_on = tk.BooleanVar(value=spec is not None or (can_fill_shape and satin is None))
         self.v_same = tk.BooleanVar(value=base.color is None)
         self.v_angle = tk.StringVar(value=f"{base.angle:g}")
         self.v_spacing = tk.StringVar(value=f"{base.spacing:g}")
         self.v_len = tk.StringVar(value=f"{base.stitch_len:g}")
+        self.v_underlay = tk.BooleanVar(value=base.underlay)
+        self.v_pull = tk.StringVar(value=f"{base.pull_comp:g}")
         self.v_outline = tk.BooleanVar(value=outline)
+        self.v_style = tk.StringVar(value="satin" if satin else "run")
+        self.v_width = tk.StringVar(value=f"{(satin or SatinSpec()).width:g}")
         self._img = None
+        grey = dict(foreground="#666666")
 
         f = ttk.Frame(self, padding=12)
         f.pack(fill="both", expand=True)
-        ttk.Checkbutton(f, text="Fill the inside with stitches", variable=self.v_on,
-                        command=self._enable).grid(row=0, column=0, columnspan=3, sticky="w")
+
+        # Fill ------------------------------------------------------------
+        ff = ttk.LabelFrame(f, text=" Fill ", padding=8)
+        ff.pack(fill="x")
+        chk = ttk.Checkbutton(ff, text="Fill the inside with stitches", variable=self.v_on,
+                              command=self._enable)
+        chk.grid(row=0, column=0, columnspan=3, sticky="w")
+        if not can_fill_shape:
+            self.v_on.set(False)
+            chk.configure(state="disabled")
+            ttk.Label(ff, text="(open shapes can't be filled)", **grey).grid(row=0, column=2, sticky="e")
         self.widgets = []
-        ttk.Label(f, text="Thread").grid(row=1, column=0, sticky="nw", pady=(8, 2))
-        tf = ttk.Frame(f)
+        ttk.Label(ff, text="Thread").grid(row=1, column=0, sticky="nw", pady=(8, 2))
+        tf = ttk.Frame(ff)
         tf.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 2))
         r1 = ttk.Radiobutton(tf, text="Same as the outline", variable=self.v_same, value=True)
         r1.pack(anchor="w")
@@ -350,28 +369,49 @@ class FillDialog(tk.Toplevel):
         b = ttk.Button(of, text="Choose…", command=self._pick)
         b.pack(side="left", padx=6)
         self.widgets += [r1, r2, b]
-        grey = dict(foreground="#666666")
-        rows = (("Angle (°)", self.v_angle, "direction of the stitch rows; 45 is usual"),
+        rows = (("Angle (°)", self.v_angle, "direction of the rows; turns with the object"),
                 ("Row spacing (mm)", self.v_spacing, "0.4 is typical; smaller is denser"),
-                ("Stitch length (mm)", self.v_len, "3–4 mm"))
+                ("Stitch length (mm)", self.v_len, "3–4 mm"),
+                ("Pull compensation (mm)", self.v_pull, "0.2 typical; more for stretchy fabric"))
         for i, (label, var, hint) in enumerate(rows, start=2):
-            ttk.Label(f, text=label).grid(row=i, column=0, sticky="w", pady=2)
-            e = ttk.Entry(f, textvariable=var, width=7)
+            ttk.Label(ff, text=label).grid(row=i, column=0, sticky="w", pady=2)
+            e = ttk.Entry(ff, textvariable=var, width=7)
             e.grid(row=i, column=1, sticky="w", pady=2)
-            ttk.Label(f, text=hint, **grey).grid(row=i, column=2, sticky="w", padx=6)
+            ttk.Label(ff, text=hint, **grey).grid(row=i, column=2, sticky="w", padx=6)
             self.widgets.append(e)
-        ttk.Checkbutton(f, text="Also sew the outline (sewn on top of the fill)",
-                        variable=self.v_outline).grid(row=5, column=0, columnspan=3, sticky="w",
-                                                      pady=(8, 0))
+        u = ttk.Checkbutton(ff, text="Underlay (light stitches first, so the fill lies flat)",
+                            variable=self.v_underlay)
+        u.grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.widgets.append(u)
+
+        # Outline ---------------------------------------------------------
+        fo = ttk.LabelFrame(f, text=" Outline ", padding=8)
+        fo.pack(fill="x", pady=(8, 0))
+        ttk.Checkbutton(fo, text="Sew the outline (on top of any fill)",
+                        variable=self.v_outline, command=self._enable).grid(
+            row=0, column=0, columnspan=3, sticky="w")
+        self.o_widgets = []
+        sf = ttk.Frame(fo)
+        sf.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        for val, text in (("run", "Run stitch (a thin line)"), ("satin", "Satin column, width")):
+            rb = ttk.Radiobutton(sf, text=text, value=val, variable=self.v_style)
+            rb.pack(side="left", padx=(0, 6))
+            self.o_widgets.append(rb)
+        e = ttk.Entry(sf, textvariable=self.v_width, width=5)
+        e.pack(side="left")
+        ttk.Label(sf, text=" mm  (1–5 mm suits borders)", **grey).pack(side="left")
+        self.o_widgets.append(e)
+
         self.info = ttk.Label(f, text="", foreground=ERROR_COLOUR)
-        self.info.grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.info.pack(anchor="w", pady=(6, 0))
         bf = ttk.Frame(f)
-        bf.grid(row=7, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        bf.pack(anchor="e", pady=(8, 0))
         ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right")
         ttk.Button(bf, text="OK", command=self._ok).pack(side="right", padx=6)
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Return>", lambda e: self._ok())
         self._show_thread()
+        self._enable()
         _centre_on(self, parent)
 
     def _show_thread(self):
@@ -393,27 +433,36 @@ class FillDialog(tk.Toplevel):
         state = "normal" if self.v_on.get() else "disabled"
         for w in self.widgets:
             w.configure(state=state)
+        ostate = "normal" if self.v_outline.get() else "disabled"
+        for w in self.o_widgets:
+            w.configure(state=ostate)
+
+    def _num(self, var, label, lo, hi):
+        try:
+            v = float(var.get())
+        except ValueError:
+            raise ValueError(f"{label} must be a number.") from None
+        if not lo <= v <= hi:
+            raise ValueError(f"{label} must be between {lo:g} and {hi:g}.")
+        return v
 
     def _ok(self):
-        if not self.v_on.get():
-            self.result = (None, self.v_outline.get())
-            self.destroy()
-            return
         try:
-            angle = float(self.v_angle.get())
-            spacing = float(self.v_spacing.get())
-            length = float(self.v_len.get())
-        except ValueError:
-            self.info.configure(text="Angle, spacing and stitch length must be numbers.")
+            fill = None
+            if self.v_on.get():
+                fill = FillSpec(None if self.v_same.get() else self.other_rgb,
+                                self._num(self.v_angle, "Angle", -360, 360),
+                                self._num(self.v_spacing, "Row spacing", 0.2, 3),
+                                self._num(self.v_len, "Stitch length", 1, 12),
+                                self.v_underlay.get(),
+                                self._num(self.v_pull, "Pull compensation", 0, 1))
+            satin = None
+            if self.v_outline.get() and self.v_style.get() == "satin":
+                satin = SatinSpec(width=self._num(self.v_width, "Satin width", 0.5, 8))
+        except ValueError as e:
+            self.info.configure(text=str(e))
             return
-        if not 0.2 <= spacing <= 3:
-            self.info.configure(text="Row spacing must be between 0.2 and 3 mm.")
-            return
-        if not 1 <= length <= 12:
-            self.info.configure(text="Stitch length must be between 1 and 12 mm.")
-            return
-        color = None if self.v_same.get() else self.other_rgb
-        self.result = (FillSpec(color, angle, spacing, length), self.v_outline.get())
+        self.result = {"fill": fill, "outline": self.v_outline.get(), "satin": satin}
         self.destroy()
 
     def wait(self):
@@ -439,6 +488,8 @@ class App:
         self.skipped: set[str] = set()
         self.fills: dict[str, FillSpec] = {}         # obj_id -> fill settings
         self.no_outline: set[str] = set()            # objects whose outline is not sewn
+        self.satins: dict[str, SatinSpec] = {}       # obj_id -> satin outline settings
+        self.color_order: list = []                  # user's sewing order: [(phase, rgb), ...]
         self.warnings: list[str] = []
         self.placed: dict[str, list[list[tuple[float, float]]]] = {}
         self.plan: Plan | None = None
@@ -463,6 +514,8 @@ class App:
         self.v_margin = tk.StringVar(value="2")
         self.v_stitch = tk.StringVar(value="2.5")
         self.v_keep = tk.BooleanVar(value=False)
+        self.v_knockout = tk.BooleanVar(value=True)
+        self.v_spm = tk.StringVar(value="650")
         self.v_pes = tk.StringVar(value="1")
         self.v_jumps = tk.BooleanVar(value=True)
         self.v_dots = tk.BooleanVar(value=True)
@@ -488,7 +541,8 @@ class App:
         self.v_x, self.v_y = tk.StringVar(), tk.StringVar()
         self.v_rot = tk.StringVar(value="15")
         self.v_ratio = tk.BooleanVar(value=True)
-        for v in (self.v_hoop_w, self.v_hoop_h, self.v_margin, self.v_stitch, self.v_keep):
+        for v in (self.v_hoop_w, self.v_hoop_h, self.v_margin, self.v_stitch, self.v_keep,
+                  self.v_knockout, self.v_spm):
             v.trace_add("write", lambda *a: self.schedule())
         self.v_jumps.trace_add("write", lambda *a: self.draw_preview())
         self.v_dots.trace_add("write", lambda *a: self.draw_preview())
@@ -561,7 +615,7 @@ class App:
         btns = ttk.Frame(f_obj)
         btns.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Button(btns, text="Choose thread…", command=self.change_thread).pack(side="left")
-        ttk.Button(btns, text="Fill…", command=self.edit_fill).pack(side="left", padx=(6, 0))
+        ttk.Button(btns, text="Fill / outline…", command=self.edit_fill).pack(side="left", padx=(6, 0))
         ttk.Button(btns, text="Sew / skip", command=self.toggle_skip).pack(side="left", padx=6)
         ttk.Button(btns, text="Delete text", command=self.delete_selected).pack(side="left")
         ttk.Button(btns, text="Reset all", command=self.reset_all).pack(side="left", padx=6)
@@ -652,19 +706,32 @@ class App:
         ttk.Combobox(f_set, textvariable=self.v_pes, values=("1", "6"), state="readonly",
                      width=5).grid(row=4, column=1, sticky="w", pady=2)
         ttk.Label(f_set, text="1 is tested on the PE540D", **grey).grid(row=4, column=2, sticky="w", padx=6)
+        ttk.Checkbutton(f_set, text="Cut fills out under filled shapes stacked on top",
+                        variable=self.v_knockout).grid(row=5, column=0, columnspan=3, sticky="w", pady=2)
+        ttk.Label(f_set, text="Machine speed").grid(row=6, column=0, sticky="w")
+        ttk.Entry(f_set, textvariable=self.v_spm, **num).grid(row=6, column=1, sticky="w", pady=2)
+        ttk.Label(f_set, text="stitches per minute, for the time estimate (PE540D: up to 650)",
+                  **grey).grid(row=6, column=2, sticky="w", padx=6)
 
         # Sewing order ------------------------------------------------------
         f_ord = ttk.Frame(tabs, padding=8)
         tabs.add(f_ord, text=" Sewing order ")
-        self.order = ttk.Treeview(f_ord, columns=("thread", "objects"), show="tree headings",
-                                  height=6, selectmode="none")
+        self.order = ttk.Treeview(f_ord, columns=("thread", "stitches", "time", "objects"),
+                                  show="tree headings", height=5, selectmode="browse")
         self.order.heading("#0", text="Stop", anchor="w")
-        self.order.column("#0", width=int(70 * ui), stretch=False)
-        self.order.heading("thread", text="Thread", anchor="w")
-        self.order.column("thread", width=int(150 * ui), stretch=False)
-        self.order.heading("objects", text="Objects", anchor="w")
-        self.order.column("objects", width=int(200 * ui))
+        self.order.column("#0", width=int(64 * ui), stretch=False)
+        for c, text, w in (("thread", "Thread", 130), ("stitches", "Stitches", 64),
+                           ("time", "Time", 70), ("objects", "Objects", 160)):
+            self.order.heading(c, text=text, anchor="w")
+            self.order.column(c, width=int(w * ui), stretch=c == "objects")
         self.order.pack(fill="both", expand=True)
+        ob = ttk.Frame(f_ord)
+        ob.pack(fill="x", pady=(6, 0))
+        ttk.Button(ob, text="▲ Earlier", command=lambda: self.move_stop(-1)).pack(side="left")
+        ttk.Button(ob, text="▼ Later", command=lambda: self.move_stop(1)).pack(side="left", padx=6)
+        ttk.Button(ob, text="Automatic order", command=self.auto_order).pack(side="left")
+        self.l_time = ttk.Label(ob, text="", foreground="#555555")
+        self.l_time.pack(side="right")
 
         # Preview -----------------------------------------------------------
         self.canvas = tk.Canvas(right, bg=to_hex(OUTSIDE), highlightthickness=1,
@@ -792,11 +859,11 @@ class App:
     def _state(self):
         return (dict(self.mats), dict(self.home), dict(self.colours), set(self.skipped),
                 dict(self.texts), dict(self.text_objs), list(self.order_ids),
-                dict(self.fills), set(self.no_outline))
+                dict(self.fills), set(self.no_outline), dict(self.satins), list(self.color_order))
 
     def _restore(self, st):
         (self.mats, self.home, self.colours, self.skipped, self.texts, self.text_objs,
-         self.order_ids, self.fills, self.no_outline) = st
+         self.order_ids, self.fills, self.no_outline, self.satins, self.color_order) = st
         self.fill_objects()
         self.refresh()
 
@@ -851,6 +918,8 @@ class App:
         self.colours.clear()
         self.fills.clear()
         self.no_outline.clear()
+        self.satins.clear()
+        self.color_order.clear()
         self.skipped.clear()
         self.undo_stack.clear()
         self.redo_stack.clear()
@@ -921,6 +990,8 @@ class App:
             skipped = oid in self.skipped
             outline = "(no outline)" if oid in self.no_outline else \
                 (f"{t.number}  {t.name}" if t else to_hex(rgb))
+            if oid in self.satins and oid not in self.no_outline:
+                outline += f"  (satin {self.satins[oid].width:g})"
             fill = "—"
             if oid in self.fills:
                 frgb = self.fills[oid].color or rgb
@@ -1004,7 +1075,8 @@ class App:
             return
         self.push_undo()
         for i in texts:
-            for d in (self.texts, self.text_objs, self.mats, self.home, self.colours, self.fills):
+            for d in (self.texts, self.text_objs, self.mats, self.home, self.colours, self.fills,
+                      self.satins):
                 d.pop(i, None)
             self.skipped.discard(i)
             self.no_outline.discard(i)
@@ -1020,38 +1092,58 @@ class App:
         self.skipped.clear()
         self.fills.clear()
         self.no_outline.clear()
+        self.satins.clear()
+        self.color_order.clear()
         self.mats = dict(self.home)
         self.fill_objects()
         self.refresh()
 
     # ---------------------------------------------------------------- fill
+    def _placed_fill(self, oid: str):
+        """The object's fill with its row angle turned by the object's own rotation,
+        so the rows keep their direction relative to the shape."""
+        spec = self.fills.get(oid)
+        if spec is None:
+            return None
+        a, b, c, d, _, _ = self.mats[oid]
+        turn = math.degrees(math.atan2(b, a))
+        angle = spec.angle + turn if a * d - b * c >= 0 else turn - spec.angle   # mirrored
+        return replace(spec, angle=angle)
+
     def edit_fill(self):
         sel = self._need_selection()
         if not sel:
             return
-        ok = [i for i in sel if can_fill(self.obj(i).polylines)]
-        if not ok:
-            self.set_status("Only closed shapes can be filled, and none of the selected "
-                            "objects is closed.", WARN_COLOUR)
+        sel = [i for i in sel if not self.obj(i).stitches]      # imported stitches: as they are
+        if not sel:
+            self.set_status("Imported stitches are sewn as they are; only their thread can change.",
+                            WARN_COLOUR)
             return
-        first = ok[0]
-        title = f"Fill {first}" if len(ok) == 1 else f"Fill {len(ok)} objects"
+        ok = [i for i in sel if can_fill(self.obj(i).polylines)]
+        first = (ok or sel)[0]
+        title = f"Fill and outline: {first}" if len(sel) == 1 else \
+            f"Fill and outline: {len(sel)} objects"
         res = FillDialog(self.root, self.ui, title, self.fills.get(first),
-                         first not in self.no_outline, self.chosen_rgb(self.obj(first))).wait()
+                         first not in self.no_outline, self.chosen_rgb(self.obj(first)),
+                         self.satins.get(first), can_fill_shape=bool(ok)).wait()
         if res is None:
             return
-        spec, outline = res
         self.push_undo()
-        for i in ok:
-            if spec is None:
-                self.fills.pop(i, None)
+        for i in sel:
+            if i in ok:
+                if res["fill"] is None:
+                    self.fills.pop(i, None)
+                else:
+                    self.fills[i] = res["fill"]
+            (self.no_outline.discard if res["outline"] else self.no_outline.add)(i)
+            if res["satin"] is None:
+                self.satins.pop(i, None)
             else:
-                self.fills[i] = spec
-            (self.no_outline.discard if outline else self.no_outline.add)(i)
+                self.satins[i] = res["satin"]
         self.fill_objects()
         self.refresh()
         left_out = [i for i in sel if i not in ok]
-        if left_out:
+        if left_out and res["fill"] is not None:
             self.set_status(f"Not closed shapes, so not filled: {', '.join(left_out)}", WARN_COLOUR)
 
     # ---------------------------------------------------------------- text
@@ -1436,17 +1528,22 @@ class App:
             objs.append(DesignObject(o.index, oid, o.kind, o.source_color, polys,
                                      color=self.colours.get(oid, o.source_color),
                                      skipped=oid in self.skipped,
-                                     fill=self.fills.get(oid),
-                                     outline=oid not in self.no_outline))
+                                     fill=self._placed_fill(oid),
+                                     outline=oid not in self.no_outline,
+                                     satin=self.satins.get(oid),
+                                     stitches=o.stitches))
         design = Design(objs, list(self.warnings))
         try:
             self._read_hoop()
             stitch = float(self.v_stitch.get())
+            spm = max(100, int(float(self.v_spm.get())))
             plan = plan_design(design, hoop_mm=self.hoop, margin_mm=self.margin,
-                               settings=Settings(stitch_len=stitch, keep_order=self.v_keep.get()),
+                               settings=Settings(stitch_len=stitch, keep_order=self.v_keep.get(),
+                                                 knockout=self.v_knockout.get(), machine_spm=spm,
+                                                 color_order=tuple(self.color_order)),
                                placed=True)
         except ValueError:
-            plan, err = None, "Hoop, margin and stitch length must be numbers."
+            plan, err = None, "Hoop, margin, stitch length and machine speed must be numbers."
         except ConversionError as e:
             plan, err = None, str(e)
         self.plan = plan
@@ -1464,7 +1561,7 @@ class App:
         rep = plan.report
         self.l_info.configure(
             text=f"{rep.width_mm:.1f} × {rep.height_mm:.1f} mm  ·  {rep.stitch_count} stitches"
-                 f"  ·  {rep.color_blocks} colours  ·  {rep.jump_count} jumps")
+                 f"  ·  {rep.color_blocks} colours  ·  about {format_minutes(rep.total_minutes)}")
         if self.outside:
             self.b_save.configure(state="disabled")
             self.set_status(f"Outside the sewing area: {', '.join(self.outside)}. Drag it in, "
@@ -1478,17 +1575,75 @@ class App:
             self.set_status("Ready. Save the PES when the preview looks right (Ctrl+S).", OK_COLOUR)
 
     def fill_order(self):
+        keep = self.order.selection()
         self.order.delete(*self.order.get_children())
         self._order_images.clear()
         if self.plan is None:
+            self.l_time.configure(text="")
             return
+        rep = self.plan.report
         size = int(16 * self.ui)
-        for i, tu in enumerate(self.plan.report.thread_map, 1):
+        spm = rep.stitch_count / rep.sew_minutes if rep.sew_minutes else 650
+        for i, tu in enumerate(rep.thread_map, 1):
             img = swatch(self.root, [to_hex(tu.rgb)], size)
             self._order_images.append(img)
             name = f"{tu.thread.number}  {tu.thread.name}" if tu.thread else to_hex(tu.rgb)
-            self.order.insert("", "end", text=f" {i}", image=img,
-                              values=(name, ", ".join(tu.object_ids)))
+            self.order.insert("", "end", iid=str(i - 1), text=f" {i}", image=img,
+                              values=(name, tu.stitches, format_minutes(tu.stitches / spm),
+                                      ", ".join(tu.object_ids)))
+        if keep and self.order.exists(keep[0]):
+            self.order.selection_set(keep)
+        self.l_time.configure(
+            text=f"About {format_minutes(rep.total_minutes)}: {format_minutes(rep.sew_minutes)} "
+                 f"sewing + {format_minutes(rep.change_minutes)} for {rep.color_blocks - 1} "
+                 f"thread change(s)")
+
+    def _stop_keys(self, tu) -> list:
+        """(phase, rgb) keys of the parts sewn in one colour stop (fills, then outlines)."""
+        phases = sorted({0 if lab.endswith(" fill") else 1 for lab in tu.object_ids})
+        return [(ph, tuple(tu.rgb)) for ph in phases]
+
+    def move_stop(self, step: int):
+        """Move the selected colour stop earlier or later in the sewing order."""
+        sel = self.order.selection()
+        if not sel or self.plan is None:
+            self.set_status("Select a colour stop in the Sewing order list first.", WARN_COLOUR)
+            return
+        if self.v_keep.get():
+            self.set_status("Untick 'Keep drawing order' (Stitching tab) to reorder colour stops.",
+                            WARN_COLOUR)
+            return
+        tmap = self.plan.report.thread_map
+        i = int(sel[0])
+        j = i + step
+        if not 0 <= j < len(tmap):
+            return
+        keys = [self._stop_keys(tu) for tu in tmap]
+        before = [k for ks in keys for k in ks]
+        keys[i], keys[j] = keys[j], keys[i]
+        # fills always come before outlines: keep the new order within each group, so a
+        # stop holding a fill and an outline moves its fill among the fills
+        order = sorted((k for ks in keys for k in ks), key=lambda k: k[0])
+        if order == before:
+            self.set_status("Fills are always sewn before outlines, so this stop can't move past "
+                            "that one.", WARN_COLOUR)
+            return
+        self.push_undo()
+        self.color_order = order
+        self.refresh()
+        # keep the moved stop selected (find it by its first key)
+        moved = keys[j][0]
+        for n, tu in enumerate(self.plan.report.thread_map if self.plan else []):
+            if moved in self._stop_keys(tu):
+                self.order.selection_set(str(n))
+                break
+
+    def auto_order(self):
+        if self.color_order:
+            self.push_undo()
+            self.color_order = []
+            self.refresh()
+        self.set_status("Automatic sewing order: fewest colour changes, fills before outlines.")
 
     # ---------------------------------------------------------------- preview drawing
     def _schedule_draw(self):
