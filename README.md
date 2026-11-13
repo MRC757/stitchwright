@@ -147,7 +147,11 @@ Esc selects nothing. Then:
   group.
 
 Anything outside the sewing area is outlined in red, and Save stays off until it is moved back
-in. **View → Inches** shows sizes in inches. Undo and Redo (Ctrl+Z / Ctrl+Y) cover every
+in. Where the design sits in the hoop is for arranging only: the PES file starts at the
+design's top-left corner, as Brother's own software writes it, and the machine places the
+design itself (centred; move it on the machine's screen if you need to). Keep the hoop set to
+4 × 4 in for the PE540D so the size check matches the machine. **View → Inches** shows sizes
+in inches. Undo and Redo (Ctrl+Z / Ctrl+Y) cover every
 change.
 
 ### Settings and sewing order

@@ -65,8 +65,36 @@ def test_convert_roundtrip_and_colors(tmp_path):
     assert len(back.threadlist) == rep.color_blocks == 4
     bx0, by0, bx1, by1 = back.bounds()
     assert (bx1 - bx0) / 10 == pytest.approx(56.0, abs=0.5)
-    assert abs(bx0 + bx1) < 20 and abs(by0 + by1) < 20
+    assert (bx0, by0) == (0, 0)                 # the stitch data starts at the top-left corner
     assert not os.path.exists(out + ".part")
+
+
+def test_pes_starts_at_the_designs_corner_wherever_it_sits_in_the_hoop(tmp_path):
+    """Brother's own PES files start their stitch data at the design's top-left corner and
+    the machine places the design itself. A design placed low in a 5 x 7 hoop used to be
+    written from the hoop centre, a point outside the design, and the PE540D sewed half
+    of it squashed against the edge of its sewing area."""
+    from stitchwright.svg_import import Design, DesignObject
+    low = DesignObject(1, "heart", "Path", RED, [square(-25, 14, 26, 60)], color=RED)
+    plan = plan_design(Design([low], []), hoop_mm=(130, 180), placed=True)
+    out = str(tmp_path / "heart.pes")
+    write_pes_file(plan, out)
+    back = pyembroidery.read_pes(out)
+    px0, py0, px1, py1 = plan.pattern.bounds()
+    bx0, by0, bx1, by1 = back.bounds()
+    assert (bx0, by0) == (0, 0)
+    assert (bx1, by1) == (px1 - px0, py1 - py0)              # same size ...
+
+    def steps(p):
+        pts = [(x, y) for x, y, c in p.stitches if c & 0xFF == pyembroidery.STITCH]
+        return [(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:])]
+    assert steps(back) == steps(plan.pattern)                # ... and the same stitches
+    assert plan.pattern.bounds() == (px0, py0, px1, py1)     # the plan itself is untouched
+    with open(out, "rb") as f:                               # and the PEC size field agrees
+        data = f.read()
+    blk = int.from_bytes(data[8:12], "little") + 512
+    assert (int.from_bytes(data[blk + 8:blk + 10], "little"),
+            int.from_bytes(data[blk + 10:blk + 12], "little")) == (px1 - px0, py1 - py0)
 
 
 def test_operator_color_pick_changes_thread(tmp_path):

@@ -454,12 +454,27 @@ def outside_hoop(design: Design, hoop_mm: tuple[float, float], margin_mm: float,
     return out
 
 
+def machine_pattern(pattern: EmbPattern) -> EmbPattern:
+    """A copy of the pattern moved so its top-left corner is at (0, 0), where the PEC
+    stitch data starts, as Brother's own software writes PES files; the machine then
+    places the design itself (centred in the hoop). Written as planned, a design placed
+    off-centre on the canvas starts from a point outside itself, and the PE540D sewed
+    part of it squashed against the edge of its sewing area."""
+    x0, y0, _, _ = pattern.bounds()
+    out = EmbPattern()
+    out.stitches = [[x - x0, y - y0, c] for x, y, c in pattern.stitches]
+    out.threadlist = list(pattern.threadlist)
+    out.extras = dict(pattern.extras)
+    return out
+
+
 def write_pes_file(plan: Plan, out_path: str, pes_version: int = 1) -> Report:
-    """Write the plan as PES. The file is written to a temporary name and read
-    back before it replaces out_path, so a failure never leaves a broken file."""
+    """Write the plan as PES, with the design's top-left corner at the stitch origin
+    (see machine_pattern). The file is written to a temporary name and read back
+    before it replaces out_path, so a failure never leaves a broken file."""
     tmp = out_path + ".part"
     try:
-        pyembroidery.write_pes(plan.pattern, tmp, {"version": float(pes_version)})
+        pyembroidery.write_pes(machine_pattern(plan.pattern), tmp, {"version": float(pes_version)})
         back = pyembroidery.read_pes(tmp)
         if back is None or not back.stitches:
             raise ConversionError("Written PES could not be read back")

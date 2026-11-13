@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **PES files start at the design's top-left corner**, as Brother's own software writes them,
+  and the machine places the design. Before, a design placed off-centre on the canvas was
+  written from the hoop centre, a point outside the design: a heart placed low in the
+  5 × 7 in hoop setting sewed on the PE540D with half of it squashed into a line at the edge
+  of the sewing area. Where a design sits on the canvas no longer matters to the machine.
+
 ## 0.2.3 (2026-11-12)
 
 Fixes from a code review. The tie and travel fix below has been sewn on the PE540D (filled
