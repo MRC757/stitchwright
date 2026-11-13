@@ -156,7 +156,9 @@ change.
 
 ### Settings and sewing order
 - **Stitching** tab:
-  - hoop (pick a preset or type a size), margin and run-stitch length
+  - hoop (pick a preset or type a size), margin and run-stitch length. For the PE540D keep
+    it on **4 × 4 in (100 × 100 mm): PE540D**: a larger hoop lets you lay out a design the
+    machine can't sew
   - *Keep drawing order*: sew in the artwork's order (usually means more colour changes)
   - *Cut fills out under filled shapes stacked on top*
   - machine speed, used for the time estimate
@@ -233,7 +235,9 @@ colour stop.
 
 ## Trying it on the machine
 
-1. Copy `samples/sample.pes` to a FAT32 USB stick. Use a short file name without spaces.
+1. In the window, check the hoop is set to 4 × 4 in (100 × 100 mm) before saving your own
+   designs. Copy `samples/sample.pes` to a FAT32 USB stick. Use a short file name without
+   spaces.
 2. Check that it loads, the size reads about 56 × 36 mm, and 5 colour stops appear.
    `samples/sample.pes` has been checked on a PE540D. `samples/sample_v2.pes` is the same design
    made with version 0.2.0 (the sun in 214 Deep Gold, and shorter stitches on its curve).
@@ -280,6 +284,13 @@ The window writes a log to `%LOCALAPPDATA%\stitchwright\stitchwright.log` (on ma
 `~/.stitchwright/stitchwright.log`): the files opened and saved, and the details of any unexpected
 error, which is also shown in a dialog. **Help → Open log folder** opens it; include the log
 when reporting a problem.
+
+**Part of the design sews squashed into a line at one side.** The design reached past the
+machine's sewing area. Check the hoop setting on the Stitching tab is 4 × 4 in (100 × 100 mm)
+for the PE540D. With the 5 × 7 in setting the window accepts designs up to 126 × 176 mm, and
+the PE540D runs out of room. Files saved by versions up to 0.2.3 also kept the design's
+position on the canvas, so a design placed off-centre could hit the edge even though it was
+small enough; save it again with a later version.
 
 ## Future features
 

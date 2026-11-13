@@ -7,6 +7,8 @@
   written from the hoop centre, a point outside the design: a heart placed low in the
   5 × 7 in hoop setting sewed on the PE540D with half of it squashed into a line at the edge
   of the sewing area. Where a design sits on the canvas no longer matters to the machine.
+  (The hoop was also set to 5 × 7 in, which the PE540D can't use; the README now says to keep
+  it on 4 × 4 in, and what a design squashed at one side means.)
 
 ## 0.2.3 (2026-11-12)
 
