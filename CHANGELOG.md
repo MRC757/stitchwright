@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Font list with previews.** In Add text / Edit text, each font's name is shown in that
+  font, there is a search box, and pointing at a font shows your text in it in the preview
+  before you choose it (click or arrow keys to choose). Before any text is typed the preview
+  shows a sample. Symbol fonts show their pictures, with the name beside them.
+
 ## 0.2.4 (2026-11-13)
 
 The PES placement fix has been sewn on the PE540D (a filled shape with lettering, placed

@@ -113,6 +113,10 @@ Windows app is built with, which need Python 3.12 or later; on Python 3.10 or 3.
   result and names the threads. Simple, flat-coloured pictures (logos, clip art) work best.
 - **Add text…** (Ctrl+T): type the text, choose a font and the letter height (the height of
   the capitals).
+  - The font list shows each font's name written in that font. Type in *Search* to narrow it
+    (for example "script"). Point at a font to see your text in it in the preview below,
+    before choosing it; click it, or use the arrow keys, to choose it. Symbol fonts such as
+    Wingdings show their pictures with the name beside them.
   - The **Single-line** fonts at the top of the list sew each letter as one clean line, which
     is best for small lettering.
   - *Arc* bends the text: 90 arches it up, -90 curves it down.
@@ -370,6 +374,7 @@ Finished items are ticked.
 | `stitchwright/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
 | `stitchwright/convert.py` | sizing, colour choices, stitch planning, time estimate, writing PES and other machines' files |
 | `stitchwright/text.py` | text with installed and single-line fonts, arcs, monograms |
+| `stitchwright/fontpreview.py` | each font's name drawn in that font, for the font list |
 | `stitchwright/geometry.py` | transforms and shared polyline helpers (simplify, smooth, ...) |
 | `stitchwright/project.py` | `.stitchwright` project files |
 | `stitchwright/preview.py` | the stitch preview (whole hoop or zoomed) and the sew-out |

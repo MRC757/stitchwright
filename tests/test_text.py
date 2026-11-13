@@ -101,3 +101,66 @@ def test_monogram_and_arc_layouts():
         xs = [q for pl in polys for q in pl.points if abs(q[0]) < 2]
         return min(q[1] for q in xs)
     assert mid_top(arch) < mid_top(smile)
+
+
+# --- font previews (each font's name shown in that font) ----------------------------
+
+def test_font_samples_are_drawn_in_the_font(tmp_path):
+    from stitchwright.fontpreview import is_symbol_font, sample_image
+    from stitchwright.text import SINGLE_LINE_FONTS, HERSHEY_PREFIX
+    name, path, idx = any_font()
+    img = sample_image(path, idx, name, 30)
+    assert img.height == 30 and img.width > 30 and img.getbbox() is not None
+    assert not is_symbol_font(path, idx)
+    single = HERSHEY_PREFIX + next(iter(SINGLE_LINE_FONTS.values()))
+    line = sample_image(single, 0, "Single-line Sans", 30)
+    assert line.height == 30 and line.getbbox() is not None
+    assert not is_symbol_font(single)
+    bad = tmp_path / "broken.ttf"
+    bad.write_bytes(b"not a font")
+    assert sample_image(str(bad), 0, "Broken", 30) is None        # no picture, no crash
+    assert sample_image(path, idx, "   ", 30) is None
+
+
+def test_symbol_fonts_draw_their_pictures():
+    from stitchwright.fontpreview import is_symbol_font, sample_image
+    from stitchwright.text import installed_fonts
+    fonts = installed_fonts()
+    if "Wingdings" not in fonts:
+        pytest.skip("Wingdings isn't installed")
+    path, idx = fonts["Wingdings"]
+    assert is_symbol_font(path, idx)
+    img = sample_image(path, idx, "Wingdings", 30)
+    assert img is not None and img.getbbox() is not None
+
+
+def test_text_dialog_lists_fonts_drawn_in_themselves_and_previews_before_choosing(window):
+    from stitchwright.dialogs import TextDialog
+    from stitchwright.text import TextSpec
+    name, path, idx = any_font()
+    dlg = TextDialog(window, 1.0, TextSpec("Mia", path, name, idx, 10), editing=False)
+    try:
+        dlg.update()
+        fl = dlg.font_list
+        assert fl.selected == name and dlg.v_font.get() == name
+        assert any(fl._photos.values())                       # rows on screen are drawn
+        assert len(fl._photos) < len(fl.names) or len(fl.names) < 20   # ... and only those
+        fl.v_search.set("single-line")                        # search narrows the list
+        assert fl.shown and all(n.lower().startswith("single-line") for n in fl.shown)
+        other = fl.shown[0]
+        fl._set_hover(other)                                  # pointing at a font previews it
+        dlg._preview()
+        assert dlg.info.cget("text").startswith(f"Preview in {other}")
+        assert dlg.v_font.get() == name                       # ... without choosing it
+        fl._set_hover(None)
+        dlg._preview()
+        assert not dlg.info.cget("text").startswith("Preview in")
+        fl.select(other)                                      # clicking chooses it
+        assert dlg.v_font.get() == other and dlg._spec().font_name == other
+        fl._step(1)                                           # so do the arrow keys
+        chosen = fl.shown[1]
+        assert dlg.v_font.get() == chosen
+        fl.v_search.set("no font is called this")             # nothing matches: the choice stays
+        assert fl.shown == [] and dlg.v_font.get() == chosen
+    finally:
+        dlg.destroy()

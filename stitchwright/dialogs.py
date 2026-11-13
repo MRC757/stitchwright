@@ -12,6 +12,7 @@ from tkinter import font as tkfont
 from PIL import Image, ImageTk
 
 from .fill import FillSpec, SatinSpec
+from .fontpreview import is_symbol_font, sample_image
 from .geometry import bounds
 from .image_import import TraceSettings
 from .image_import import preview as image_preview
@@ -130,6 +131,197 @@ class ThreadPicker(tk.Toplevel):
         return self.result
 
 
+class FontList(ttk.Frame):
+    """A scrolling list of fonts, each name drawn in its own font, with a search box.
+    Rows are drawn only when they scroll into view (a computer can have hundreds of
+    fonts) and kept. on_select(name) is called when a font is chosen (click, arrow keys,
+    Enter in the search box); on_hover(name or None) as the mouse moves over the rows."""
+
+    def __init__(self, parent, fonts: dict, ui: float, selected: str,
+                 on_select=None, on_hover=None, rows: int = 7):
+        super().__init__(parent)
+        self.fonts = fonts
+        self.names = list(fonts)
+        self.shown = list(self.names)
+        self.selected = selected
+        self.on_select, self.on_hover = on_select, on_hover
+        self.row = int(34 * ui)
+        self._photos: dict = {}              # name -> PhotoImage, or None if it can't be drawn
+        self._drawn: set = set()
+        self._hover = None
+
+        self.v_search = tk.StringVar()
+        top = ttk.Frame(self)
+        top.pack(fill="x", pady=(0, 3))
+        ttk.Label(top, text="Search").pack(side="left")
+        self.e_search = ttk.Entry(top, textvariable=self.v_search)
+        self.e_search.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        box = ttk.Frame(self)
+        box.pack(fill="both", expand=True)
+        self.cv = tk.Canvas(box, width=int(340 * ui), height=self.row * rows, bg="white",
+                            highlightthickness=1, highlightbackground="#cccccc",
+                            yscrollincrement=self.row, takefocus=1)
+        sb = ttk.Scrollbar(box, orient="vertical", command=self._yview)
+        self.cv.configure(yscrollcommand=sb.set)
+        self.cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+
+        self.v_search.trace_add("write", lambda *a: self._filter())
+        self.cv.bind("<Configure>", lambda e: self._layout())
+        self.cv.bind("<MouseWheel>", self._wheel)
+        self.cv.bind("<Button-4>", lambda e: self._scroll(-3))       # mouse wheel on Linux
+        self.cv.bind("<Button-5>", lambda e: self._scroll(3))
+        self.cv.bind("<Button-1>", self._click)
+        self.cv.bind("<Motion>", self._motion)
+        self.cv.bind("<Leave>", lambda e: self._set_hover(None))
+        for w in (self.cv, self.e_search):
+            w.bind("<Up>", lambda e: self._step(-1))
+            w.bind("<Down>", lambda e: self._step(1))
+            w.bind("<Prior>", lambda e: self._step(-rows))
+            w.bind("<Next>", lambda e: self._step(rows))
+        self.cv.bind("<Home>", lambda e: self._step(-len(self.shown)))
+        self.cv.bind("<End>", lambda e: self._step(len(self.shown)))
+        self.e_search.bind("<Return>", self._search_enter)
+        self._layout()                       # scroll area now, so see() works before it's shown
+
+    # ------------------------------------------------------------ drawing
+    def photo(self, name: str):
+        """The picture of name in its own font (cached); None if the font can't be drawn."""
+        if name not in self._photos:
+            path, idx = self.fonts[name]
+            img = sample_image(path, idx, name, self.row - 6)
+            self._photos[name] = None if img is None else ImageTk.PhotoImage(img, master=self)
+        return self._photos[name]
+
+    def _layout(self):
+        self.cv.delete("all")
+        self._drawn.clear()
+        w = max(self.cv.winfo_width(), int(self.cv["width"]))
+        self.cv.configure(scrollregion=(0, 0, w, max(1, len(self.shown)) * self.row))
+        if not self.shown:
+            self.cv.create_text(10, self.row / 2, anchor="w", text="No font matches the search",
+                                fill="#888888", font=ui_font(self))
+        self._draw_visible()
+        self._mark()
+
+    def _draw_visible(self):
+        top = self.cv.canvasy(0)
+        h = max(self.cv.winfo_height(), int(self.cv["height"]))
+        first = max(0, int(top // self.row) - 1)
+        last = min(len(self.shown), int((top + h) // self.row) + 2)
+        for i in range(first, last):
+            name = self.shown[i]
+            if name not in self._drawn:
+                self._drawn.add(name)
+                self._draw_row(i, name)
+
+    def _draw_row(self, i: int, name: str):
+        y = i * self.row + self.row / 2
+        img = self.photo(name)
+        path, idx = self.fonts[name]
+        if img is None:
+            self.cv.create_text(8, y, anchor="w", text=f"{name}  (can't show this font)",
+                                fill="#888888", font=ui_font(self))
+            return
+        self.cv.create_image(6, y, anchor="w", image=img)
+        if is_symbol_font(path, idx):        # its pictures don't spell the name: say it too
+            self.cv.create_text(16 + img.width(), y, anchor="w", text=name,
+                                fill="#777777", font=ui_font(self))
+
+    def _mark(self):
+        self.cv.delete("sel")
+        if self.selected in self.shown:
+            i = self.shown.index(self.selected)
+            w = max(self.cv.winfo_width(), int(self.cv["width"]))
+            self.cv.create_rectangle(0, i * self.row, w, (i + 1) * self.row,
+                                     fill="#d4e6fb", outline="", tags="sel")
+            self.cv.tag_lower("sel")
+
+    # ------------------------------------------------------------ scrolling
+    def _yview(self, *args):
+        self.cv.yview(*args)
+        self._draw_visible()
+
+    def _scroll(self, rows: int):
+        self.cv.yview_scroll(rows, "units")
+        self._draw_visible()
+
+    def _wheel(self, event):
+        self._scroll(-3 if event.delta > 0 else 3)
+        return "break"
+
+    def see(self, name: str):
+        """Scroll so that name is in view."""
+        if name not in self.shown:
+            return
+        i = self.shown.index(name)
+        top = self.cv.canvasy(0)
+        h = max(self.cv.winfo_height(), int(self.cv["height"]))
+        rows_in_view = max(1, h // self.row)
+        if i * self.row < top or (i + 1) * self.row > top + h:
+            first = max(0, i - rows_in_view // 2)
+            self.cv.yview_moveto(first / max(1, len(self.shown)))
+        self._draw_visible()
+
+    # ------------------------------------------------------------ choosing
+    def select(self, name: str, notify: bool = True):
+        self.selected = name
+        self._mark()
+        self.see(name)
+        if notify and self.on_select:
+            self.on_select(name)
+
+    def add(self, name: str):
+        """Add a font (e.g. from a font file) and choose it."""
+        if name not in self.names:
+            self.names.append(name)
+        self._photos.pop(name, None)
+        self.v_search.set("")                # shows the whole list, with the new font
+        self._filter()
+        self.select(name)
+
+    def _index_at(self, y: int) -> int | None:
+        i = int(self.cv.canvasy(y) // self.row)
+        return i if 0 <= i < len(self.shown) else None
+
+    def _click(self, event):
+        self.cv.focus_set()
+        i = self._index_at(event.y)
+        if i is not None:
+            self.select(self.shown[i])
+
+    def _motion(self, event):
+        i = self._index_at(event.y)
+        self._set_hover(None if i is None else self.shown[i])
+
+    def _set_hover(self, name):
+        if name != self._hover:
+            self._hover = name
+            if self.on_hover:
+                self.on_hover(name)
+
+    def _step(self, delta: int):
+        if not self.shown:
+            return "break"
+        i = self.shown.index(self.selected) if self.selected in self.shown else -1
+        i = max(0, min(len(self.shown) - 1, i + delta if i >= 0 else 0))
+        self.select(self.shown[i])
+        return "break"
+
+    def _filter(self):
+        typed = self.v_search.get().strip().lower()
+        self.shown = [n for n in self.names if typed in n.lower()]
+        self.cv.yview_moveto(0)
+        self._layout()
+        if self.selected in self.shown:
+            self.see(self.selected)
+
+    def _search_enter(self, event):
+        if self.shown:
+            self.select(self.selected if self.selected in self.shown else self.shown[0])
+        return "break"
+
+
 class TextDialog(tk.Toplevel):
     """Modal dialog to type text and choose its font and size, with a live
     outline preview. After wait(), .result is a TextSpec or None."""
@@ -144,6 +336,7 @@ class TextDialog(tk.Toplevel):
         self.fonts = dict(installed_fonts())
         self.names = list(self.fonts)
         self._job = None
+        self._hover: str | None = None       # font under the mouse in the list: previewed
 
         d = default_font()
         if spec is None:
@@ -165,10 +358,12 @@ class TextDialog(tk.Toplevel):
         self.t_text.insert("1.0", spec.text)
 
         self.v_font = tk.StringVar(value=spec.font_name)
-        ttk.Label(f, text="Font").grid(row=1, column=0, sticky="w", pady=2)
-        self.c_font = ttk.Combobox(f, textvariable=self.v_font, values=self.names, width=34)
-        self.c_font.grid(row=1, column=1, columnspan=2, sticky="we", pady=2)
-        ttk.Button(f, text="Font file…", command=self._browse).grid(row=1, column=3, sticky="w", padx=(6, 0))
+        ttk.Label(f, text="Font").grid(row=1, column=0, sticky="nw", pady=(6, 2))
+        self.font_list = FontList(f, self.fonts, ui, spec.font_name,
+                                  on_select=self._font_chosen, on_hover=self._font_hover)
+        self.font_list.grid(row=1, column=1, columnspan=2, sticky="we", pady=2)
+        ttk.Button(f, text="Font file…", command=self._browse).grid(row=1, column=3, sticky="nw",
+                                                                   padx=(6, 0), pady=(2, 0))
 
         self.v_height = tk.StringVar(value=f"{spec.height_mm:g}")
         self.v_spacing = tk.StringVar(value=f"{spec.spacing_mm:g}")
@@ -195,7 +390,8 @@ class TextDialog(tk.Toplevel):
         ttk.Checkbutton(f, text="Monogram: three letters, the middle one larger",
                         variable=self.v_mono).grid(row=6, column=0, columnspan=4, sticky="w", pady=2)
         ttk.Label(f, foreground="#666666", text="Tip: the Single-line fonts (top of the list) sew "
-                  "each letter as one clean line: best for small lettering.").grid(
+                  "each letter as one clean line: best for small lettering. Point at a font to\n"
+                  "see your text in it below; click it (or use the arrow keys) to choose it.").grid(
             row=7, column=0, columnspan=4, sticky="w")
 
         self.cv = tk.Canvas(f, width=int(480 * ui), height=int(150 * ui), bg="white",
@@ -212,20 +408,21 @@ class TextDialog(tk.Toplevel):
         self.t_text.bind("<KeyRelease>", lambda e: self._schedule())
         # Ctrl+Enter means OK: stop the text box also treating it as Enter (a new line)
         self.t_text.bind("<Control-Return>", lambda e: (self._ok(), "break")[1])
-        self.c_font.bind("<KeyRelease>", self._filter)
-        self.c_font.bind("<<ComboboxSelected>>", lambda e: self._schedule())
         for v in (self.v_height, self.v_spacing, self.v_align, self.v_arc, self.v_mono):
             v.trace_add("write", lambda *a: self._schedule())
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Control-Return>", lambda e: self._ok())
         _centre_on(self, parent)
+        self.update_idletasks()
+        self.font_list.see(spec.font_name)
         self._preview()
 
-    def _filter(self, event):
-        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
-            return
-        typed = self.v_font.get().lower()
-        self.c_font.configure(values=[n for n in self.names if typed in n.lower()] or self.names)
+    def _font_chosen(self, name: str):
+        self.v_font.set(name)
+        self._schedule()
+
+    def _font_hover(self, name: str | None):
+        self._hover = name
         self._schedule()
 
     def _browse(self):
@@ -237,11 +434,11 @@ class TextDialog(tk.Toplevel):
             self.fonts[name] = (path, 0)
             if name not in self.names:
                 self.names.append(name)
-            self.v_font.set(name)
-            self._schedule()
+            self.font_list.add(name)          # chooses it, which updates v_font and the preview
 
-    def _spec(self) -> TextSpec:
-        name = self.v_font.get().strip()
+    def _spec(self, font: str | None = None) -> TextSpec:
+        """The settings as typed, in the chosen font (or in `font`, for a preview)."""
+        name = (font or self.v_font.get()).strip()
         if name not in self.fonts:
             raise ValueError("Choose a font from the list")
         try:
@@ -267,12 +464,18 @@ class TextDialog(tk.Toplevel):
         self._job = self.after(150, self._preview)
 
     def _preview(self):
+        """Draw the text in the chosen font, or in the font under the mouse in the list.
+        Before any text is typed, a sample shows what the font looks like."""
         self._job = None
         cv = self.cv
         cv.delete("all")
+        hover = self._hover if self._hover in self.fonts else None
         try:
-            spec = self._spec()
-            polys, missing = text_polylines(spec) if spec.text.strip() else ([], "")
+            spec = self._spec(hover)
+            sample = not spec.text.strip()
+            if sample:
+                spec = replace(spec, text="AaBbCc 123", monogram=False)
+            polys, missing = text_polylines(spec)
         except ValueError as e:
             self.info.configure(text=str(e), foreground=ERROR_COLOUR)
             return
@@ -286,7 +489,9 @@ class TextDialog(tk.Toplevel):
         for pl in polys:
             cv.create_line(*[c for x, y in pl.points
                              for c in (cw / 2 + x * k, ch / 2 + y * k)], fill="#222222")
-        msg = f"{x1 - x0:.1f} × {y1 - y0:.1f} mm"
+        msg = "Sample (type the text to add)" if sample else f"{x1 - x0:.1f} × {y1 - y0:.1f} mm"
+        if hover and hover != self.v_font.get():
+            msg = f"Preview in {hover} (click to choose it)   ·   " + msg
         colour = "#555555"
         if missing:
             msg += f"   ·   not in this font: {missing}"
