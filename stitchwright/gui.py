@@ -889,8 +889,8 @@ class App:
                 self.set_status("Nothing to save yet: open a design or add text first.",
                                 WARN_COLOUR)
             else:
-                self.set_status(f"Can't save the PES yet: {self.plan_error or 'the design has '
-                                'no stitches.'}", ERROR_COLOUR)
+                why = self.plan_error or "the design has no stitches."
+                self.set_status(f"Can't save the PES yet: {why}", ERROR_COLOUR)
             return
         if self.outside:
             messagebox.showwarning(TITLE, "Part of the design is outside the sewing area. "
