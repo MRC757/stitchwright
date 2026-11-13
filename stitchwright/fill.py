@@ -41,7 +41,7 @@ KNOCKOUT_OVERLAP_MM = 0.4   # a cut-out fill still reaches this far under the sh
 class FillSpec:
     color: RGB | None = None    # fill thread; None = the object's own thread
     angle: float = 45.0         # row direction, degrees (0 = horizontal, positive = clockwise)
-    spacing: float = 0.4        # mm between rows (smaller = denser)
+    spacing: float = 0.2        # mm between rows (smaller = denser); 0.4 left fabric showing
     stitch_len: float = 3.5     # mm, longest stitch along a row
     underlay: bool = True       # sparse rows at right angles first
     pull_comp: float = 0.2      # mm added to each end of a row at the shape's edge

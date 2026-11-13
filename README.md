@@ -126,8 +126,8 @@ will be sewn in.
 - **Fill / outline…** (or double-click the **Fill** column) sets the stitches for the
   selected objects:
   - **Fill:** on or off; the thread (the outline's, or another); the row angle (it turns
-    with the object); row spacing (0.4 mm is typical; smaller is denser); stitch length;
-    pull compensation; and underlay.
+    with the object); row spacing (0.2 mm by default, which covers the fabric solidly;
+    larger is lighter); stitch length; pull compensation; and underlay.
   - **Outline:** on or off; run stitch or a satin column of a set width.
   - Only closed shapes can be filled.
 - **Sew / skip** (Space) leaves objects out without deleting them.
@@ -208,7 +208,7 @@ The preview is drawn from the stitches that will be saved, not from the artwork.
 | `--no-outline OBJECT` | don't sew the outline (for a fill without a border) |
 | `--satin OBJECT[=WIDTH]` | sew the outline as a satin column, WIDTH mm (default 2) |
 | `--fill-angle DEG` | direction of the fill rows (default 45) |
-| `--fill-spacing MM` | distance between fill rows; smaller is denser (default 0.4) |
+| `--fill-spacing MM` | distance between fill rows; smaller is denser (default 0.2) |
 | `--fill-stitch MM` | fill stitch length (default 3.5) |
 | `--pull-comp MM` | added to each end of a fill row (default 0.2) |
 | `--no-underlay` | fills without underlay |

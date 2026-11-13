@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Denser fills by default: rows 0.2 mm apart** instead of 0.4 mm. Sewn on the PE540D, 0.4 mm
+  let the fabric show through. A fill takes about 60% more stitches and time. Projects saved
+  earlier keep the spacing they were saved with; change it in each object's fill settings.
 - **PES files start at the design's top-left corner**, as Brother's own software writes them,
   and the machine places the design. Before, a design placed off-centre on the canvas was
   written from the hoop centre, a point outside the design: a heart placed low in the

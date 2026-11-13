@@ -73,8 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-outline", action="append", metavar="OBJECT",
                    help="don't sew this object's outline (e.g. a filled shape); repeatable")
     p.add_argument("--fill-angle", type=float, default=45.0, help="fill row angle in degrees (default 45)")
-    p.add_argument("--fill-spacing", type=float, default=0.4,
-                   help="mm between fill rows, smaller is denser (default 0.4)")
+    p.add_argument("--fill-spacing", type=float, default=0.2,
+                   help="mm between fill rows, smaller is denser (default 0.2)")
     p.add_argument("--fill-stitch", type=float, default=3.5, help="fill stitch length in mm (default 3.5)")
     p.add_argument("--no-underlay", action="store_true", help="fills without underlay")
     p.add_argument("--pull-comp", type=float, default=0.2,

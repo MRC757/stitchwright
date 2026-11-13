@@ -371,7 +371,7 @@ class FillDialog(tk.Toplevel):
         b.pack(side="left", padx=6)
         self.widgets += [r1, r2, b]
         rows = (("Angle (°)", self.v_angle, "direction of the rows; turns with the object"),
-                ("Row spacing (mm)", self.v_spacing, "0.4 is typical; smaller is denser"),
+                ("Row spacing (mm)", self.v_spacing, "0.2 covers solidly; larger is lighter"),
                 ("Stitch length (mm)", self.v_len, "3–4 mm"),
                 ("Pull compensation (mm)", self.v_pull, "0.2 typical; more for stretchy fabric"))
         for i, (label, var, hint) in enumerate(rows, start=2):
