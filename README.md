@@ -252,11 +252,13 @@ colour stop.
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
 **What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
-(`samples/sample.pes`) loads and is read by the PE540D, and filled script lettering (a
-TrueType font, fill with underlay and run-stitch outline, the 0.2.3 tie and travel stitches)
-sews cleanly. The 0.4 mm overlap under stacked shapes, satin, imported pictures and arranged
-layouts are tested in code and in the preview, but have not been sewn yet. Sew a test piece
-before using them on a real project.
+(`samples/sample.pes`) loads and is read by the PE540D; filled script lettering (a TrueType
+font, fill with underlay and run-stitch outline, the 0.2.3 tie and travel stitches) sews
+cleanly; and filled shapes with lettering, saved by 0.2.4 with the file starting at the
+design's top-left corner, are placed correctly and sew whole. The 0.2 mm fill spacing (new in
+0.2.4), the 0.4 mm overlap under stacked shapes, satin, imported pictures and the DST, EXP,
+JEF, VP3 and XXX exports are tested in code and in the preview, but have not been sewn yet.
+Sew a test piece before using them on a real project.
 
 ## Limitations
 
@@ -366,7 +368,7 @@ Finished items are ticked.
 | `stitchwright/palette.py` | the 61 Brother threads and colour parsing |
 | `stitchwright/fill.py` | fill (tatami, underlay, pull compensation, cut-outs, travel) and satin |
 | `stitchwright/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
-| `stitchwright/convert.py` | sizing, colour choices, stitch planning, time estimate, PES writing |
+| `stitchwright/convert.py` | sizing, colour choices, stitch planning, time estimate, writing PES and other machines' files |
 | `stitchwright/text.py` | text with installed and single-line fonts, arcs, monograms |
 | `stitchwright/geometry.py` | transforms and shared polyline helpers (simplify, smooth, ...) |
 | `stitchwright/project.py` | `.stitchwright` project files |

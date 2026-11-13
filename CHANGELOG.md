@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.4 (2026-11-13)
+
+The PES placement fix has been sewn on the PE540D (a filled shape with lettering, placed
+and sewn whole). The 0.2 mm fill spacing and the other machines' formats are tested in code
+and in the preview, not yet sewn.
 
 - **Export for other machines** (File → Export for another machine…, Ctrl+E): DST (Tajima,
   read by most machines), EXP (Melco, Bernina), JEF (Janome), VP3 (Pfaff, Husqvarna Viking)

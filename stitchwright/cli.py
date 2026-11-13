@@ -49,7 +49,8 @@ def _hoop(text: str) -> tuple[float, float]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="stitchwright", description="Stitchwright: turn artwork into Brother PES embroidery files")
+    ap = argparse.ArgumentParser(prog="stitchwright", description="Stitchwright: turn artwork into Brother PES embroidery files "
+                                 "(or DST, EXP, JEF, VP3 and XXX for other machines)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p_list = sub.add_parser("list", help="show the objects (and their colours) found in an SVG")
