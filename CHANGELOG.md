@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 (2026-11-12)
 
-Fixes from a code review. Tested in code and in the preview; not yet sewn on the PE540D.
+Fixes from a code review. The tie and travel fix below has been sewn on the PE540D (filled
+script lettering) and sews cleanly; the other changes are tested in code and in the preview.
 
 ### Stitches
 - **No more tiny stitches at the start of a design or inside fills.** Two causes, found when

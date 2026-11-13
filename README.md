@@ -236,10 +236,11 @@ colour stop.
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
 **What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
-(`samples/sample.pes`) loads and is read by the PE540D. Fills (including the nonzero fill
-rule and the 0.4 mm overlap under stacked shapes), satin, lettering, imported pictures and
-arranged layouts are tested in code and in the preview, but have not been sewn yet. Sew a
-test piece before using them on a real project.
+(`samples/sample.pes`) loads and is read by the PE540D, and filled script lettering (a
+TrueType font, fill with underlay and run-stitch outline, the 0.2.3 tie and travel stitches)
+sews cleanly. The 0.4 mm overlap under stacked shapes, satin, imported pictures and arranged
+layouts are tested in code and in the preview, but have not been sewn yet. Sew a test piece
+before using them on a real project.
 
 ## Limitations
 
