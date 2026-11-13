@@ -60,9 +60,11 @@ def main(argv: list[str] | None = None) -> int:
     p_gui = sub.add_parser("gui", help="open the Stitchwright window")
     p_gui.add_argument("svg", nargs="?", help="SVG to open straight away")
 
-    p = sub.add_parser("convert", help="convert an SVG to PES")
+    p = sub.add_parser("convert", help="convert an SVG to PES (or DST, EXP, JEF, VP3, XXX)")
     p.add_argument("svg")
-    p.add_argument("-o", "--out", required=True, help="output .pes file")
+    p.add_argument("-o", "--out", required=True,
+                   help="output file; its extension picks the format: .pes (Brother), .dst, .exp, "
+                        ".jef, .vp3 or .xxx")
     p.add_argument("--set", action="append", metavar="OBJECT=COLOUR",
                    help="choose the colour of one object (by id or number); repeatable")
     p.add_argument("--map", action="append", metavar="OLD=NEW",
@@ -93,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--margin", type=float, default=2.0, help="safety margin in mm (default 2)")
     p.add_argument("--stitch-len", type=float, default=2.5, help="run stitch length in mm (default 2.5)")
     p.add_argument("--keep-order", action="store_true", help="keep SVG paint order (more colour changes)")
-    p.add_argument("--pes-version", type=int, choices=(1, 6), default=1, help="PES version (default 1)")
+    p.add_argument("--pes-version", type=int, choices=(1, 6), default=1, help="PES version (default 1; PES files only)")
     p.add_argument("--no-snap", action="store_true", help="do not snap colours to the Brother palette")
     p.add_argument("--preview", metavar="PNG", help="also write a PNG preview of the stitches")
 

@@ -23,7 +23,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from . import __version__
-from .convert import ConversionError, Plan, format_minutes, write_pes_file
+from .convert import MACHINE_FORMATS, ConversionError, Plan, format_minutes, write_machine_file
 from .dialogs import (ERROR_COLOUR, OK_COLOUR, SELECT_COLOUR, WARN_COLOUR, FillDialog,
                       ImageDialog, TextDialog, ThreadPicker, swatch, ui_font)
 from .document import DocError, Document, PlanResult
@@ -404,6 +404,7 @@ class App:
             "n": (self.new_design, None, True),
             "i": (self.ask_import, None, True),
             "s": (self.save, self.save_project, True),
+            "e": (self.export_other, None, True),
             "t": (self.add_text, None, True),
             "z": (self.undo, self.redo, False),
             "y": (self.redo, None, False),
@@ -449,6 +450,8 @@ class App:
         self.m_file.add_command(label="Save project as…", command=lambda: self.save_project(True))
         self.m_file.add_command(label="Save PES for the machine…", accelerator="Ctrl+S",
                                 command=self.save)
+        self.m_file.add_command(label="Export for another machine…", accelerator="Ctrl+E",
+                                command=self.export_other)
         self.m_file.add_separator()
         self.m_file.add_command(label="Exit", command=self.exit_app)
         bar.add_cascade(label="File", menu=self.m_file)
@@ -881,6 +884,15 @@ class App:
             self.root.destroy()
 
     def save(self):
+        """Save PES for the machine (Ctrl+S)."""
+        self._save_machine_file([".pes"], "Save PES for the machine")
+
+    def export_other(self):
+        """Save in another machine's format (Ctrl+E): DST, EXP, JEF, VP3 or XXX."""
+        self._save_machine_file([e for e in MACHINE_FORMATS if e != ".pes"],
+                                "Export for another machine")
+
+    def _save_machine_file(self, exts: list[str], title: str):
         if self._job is not None:            # settings changed moments ago: re-plan first
             self.root.after_cancel(self._job)
             self.refresh()
@@ -890,7 +902,8 @@ class App:
                                 WARN_COLOUR)
             else:
                 why = self.plan_error or "the design has no stitches."
-                self.set_status(f"Can't save the PES yet: {why}", ERROR_COLOUR)
+                what = "the PES" if exts == [".pes"] else "the file"
+                self.set_status(f"Can't save {what} yet: {why}", ERROR_COLOUR)
             return
         if self.outside:
             messagebox.showwarning(TITLE, "Part of the design is outside the sewing area. "
@@ -903,12 +916,16 @@ class App:
             stem, folder = "text", os.path.expanduser("~")
         short = re.sub(r"[^A-Za-z0-9]", "", stem)[:8] or "design"
         path = filedialog.asksaveasfilename(
-            parent=self.root, title="Save PES for the machine", defaultextension=".pes",
-            initialfile=short + ".pes", initialdir=folder, filetypes=[("Brother PES", "*.pes")])
+            parent=self.root, title=title, defaultextension=exts[0],
+            initialfile=short + exts[0], initialdir=folder,
+            filetypes=[(MACHINE_FORMATS[e][0], "*" + e) for e in exts])
         if not path:
             return
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in exts:                    # typed a name without (or with another) extension
+            path, ext = os.path.splitext(path)[0] + exts[0], exts[0]
         try:
-            write_pes_file(self.plan, path, int(self.v_pes.get()))
+            write_machine_file(self.plan, path, int(self.v_pes.get()))
         except (ConversionError, OSError) as e:
             messagebox.showerror(TITLE, f"Could not save {path}:\n\n{e}", parent=self.root)
             return
@@ -916,8 +933,12 @@ class App:
         tip = ("  Tip: a short name without spaces is safest on the machine's USB stick."
                if " " in name or len(name) > 8 else "")
         rep = self.plan.report
-        log.info("Wrote PES %s (%d stitches, %d colours)", path, rep.stitch_count, rep.color_blocks)
-        self.set_status(f"Saved {path}.{tip}", OK_COLOUR)
+        log.info("Wrote %s %s (%d stitches, %d colours)", ext.lstrip(".").upper(), path,
+                 rep.stitch_count, rep.color_blocks)
+        note = ("" if MACHINE_FORMATS[ext][1] or rep.color_blocks < 2 else
+                f"  {ext.lstrip('.').upper()} files don't store thread colours: the machine will "
+                f"stop {rep.color_blocks - 1} time(s) for you to change thread.")
+        self.set_status(f"Saved {path}.{tip}{note}", OK_COLOUR)
 
     # ---------------------------------------------------------------- objects list
     def fill_objects(self):

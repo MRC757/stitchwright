@@ -454,13 +454,32 @@ def outside_hoop(design: Design, hoop_mm: tuple[float, float], margin_mm: float,
     return out
 
 
-def machine_pattern(pattern: EmbPattern) -> EmbPattern:
-    """A copy of the pattern moved so its top-left corner is at (0, 0), where the PEC
-    stitch data starts, as Brother's own software writes PES files; the machine then
-    places the design itself (centred in the hoop). Written as planned, a design placed
-    off-centre on the canvas starts from a point outside itself, and the PE540D sewed
-    part of it squashed against the edge of its sewing area."""
-    x0, y0, _, _ = pattern.bounds()
+# Embroidery files the window and the command line can write: extension -> (name, whether
+# the format stores thread colours). DST and EXP store only the colour stops; the machine
+# asks for each thread. JEF stores the nearest Janome threads. Only PES has been sewn here.
+MACHINE_FORMATS = {
+    ".pes": ("Brother PES", True),
+    ".dst": ("Tajima DST (most machines)", False),
+    ".exp": ("Melco / Bernina EXP", False),
+    ".jef": ("Janome JEF", True),
+    ".vp3": ("Pfaff / Husqvarna Viking VP3", True),
+    ".xxx": ("Singer XXX", True),
+}
+
+
+def machine_pattern(pattern: EmbPattern, origin: str = "corner") -> EmbPattern:
+    """A copy of the pattern moved for writing to a machine file, so where the design
+    sits on the canvas doesn't matter; the machine places the design itself.
+
+    origin "corner": its top-left corner at (0, 0), where the PEC stitch data starts, as
+    Brother's own software writes PES files. Written as planned, a design placed
+    off-centre on the canvas started from a point outside itself, and the PE540D sewed
+    part of it squashed against the edge of its sewing area.
+    origin "centre": its centre at (0, 0), as DST, EXP, JEF and the other formats expect
+    (their headers give the design's reach either side of the starting point)."""
+    x0, y0, x1, y1 = pattern.bounds()
+    if origin == "centre":
+        x0, y0 = (x0 + x1) // 2, (y0 + y1) // 2
     out = EmbPattern()
     out.stitches = [[x - x0, y - y0, c] for x, y, c in pattern.stitches]
     out.threadlist = list(pattern.threadlist)
@@ -488,6 +507,37 @@ def write_pes_file(plan: Plan, out_path: str, pes_version: int = 1) -> Report:
     return dataclasses.replace(plan.report, out_path=out_path)
 
 
+def write_machine_file(plan: Plan, out_path: str, pes_version: int = 1) -> Report:
+    """Write the plan in the format its extension names (see MACHINE_FORMATS). Like
+    write_pes_file, it writes a temporary file and checks it by reading it back."""
+    ext = os.path.splitext(out_path)[1].lower()
+    if ext not in MACHINE_FORMATS:
+        names = ", ".join(e.lstrip(".").upper() for e in MACHINE_FORMATS)
+        raise ConversionError(f"Can't write {ext.lstrip('.').upper() or 'a file without an extension'}"
+                              f" files. Use one of: {names}.")
+    if ext == ".pes":
+        return write_pes_file(plan, out_path, pes_version)
+    name, keeps_colours = MACHINE_FORMATS[ext]
+    tmp = os.path.splitext(out_path)[0] + ".part" + ext       # pyembroidery goes by the extension
+    try:
+        pyembroidery.write(machine_pattern(plan.pattern, "centre"), tmp)
+        back = pyembroidery.read(tmp)
+        if back is None or not back.stitches:
+            raise ConversionError(f"Written {name} file could not be read back")
+        stops = back.count_color_changes() + 1
+        if stops != plan.report.color_blocks:
+            raise ConversionError(f"Written {name} file has {stops} colour stops, "
+                                  f"expected {plan.report.color_blocks}")
+        if keeps_colours and len(back.threadlist) != plan.report.color_blocks:
+            raise ConversionError(f"Written {name} file has {len(back.threadlist)} colours, "
+                                  f"expected {plan.report.color_blocks}")
+        os.replace(tmp, out_path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return dataclasses.replace(plan.report, out_path=out_path)
+
+
 def convert(svg_path: str, out_path: str, choices: Choices | None = None, *,
             width_mm: float | None = None,
             fit: bool = False,
@@ -499,7 +549,8 @@ def convert(svg_path: str, out_path: str, choices: Choices | None = None, *,
             preview_path: str | None = None,
             svg_dpi: float | None = None,
             **legacy) -> Report:
-    """Load an SVG, plan it and write a PES file (what the CLI uses)."""
+    """Load an SVG, plan it and write an embroidery file, in the format out_path's
+    extension names (what the CLI uses)."""
     s = settings or Settings()
     _check_inputs(hoop_mm, margin_mm, width_mm, s)
     design = load_svg(svg_path)
@@ -508,7 +559,7 @@ def convert(svg_path: str, out_path: str, choices: Choices | None = None, *,
         design.warnings = [w for w in design.warnings if "72 dpi" not in w]
     plan = plan_design(design, _choices(choices, **_legacy(legacy)), width_mm=width_mm,
                        fit=fit, hoop_mm=hoop_mm, margin_mm=margin_mm, settings=s, snap=snap)
-    report = write_pes_file(plan, out_path, pes_version)
+    report = write_machine_file(plan, out_path, pes_version)
     if preview_path:
         render_preview(plan.pattern, preview_path, hoop_mm)
     return report

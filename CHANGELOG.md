@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Export for other machines** (File → Export for another machine…, Ctrl+E): DST (Tajima,
+  read by most machines), EXP (Melco, Bernina), JEF (Janome), VP3 (Pfaff, Husqvarna Viking)
+  and XXX (Singer). Each file is read back after writing to check every colour stop is
+  there. DST and EXP store no thread colours, so the status bar says how many thread changes
+  the machine will ask for. On the command line the output's extension picks the format
+  (`-o design.dst`). These formats are centred on their starting point, as their machines
+  expect; only PES has been sewn so far.
 - **Denser fills by default: rows 0.2 mm apart** instead of 0.4 mm. Sewn on the PE540D, 0.4 mm
   let the fabric show through. A fill takes about 60% more stitches and time. Projects saved
   earlier keep the spacing they were saved with; change it in each object's fill settings.

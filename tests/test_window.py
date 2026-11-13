@@ -113,6 +113,28 @@ def test_save_pes_says_why_it_cannot_save(app):
     app.refresh()
     app.save()
     assert app.v_status.get().startswith("Can't save the PES yet: Stitch length")
+    app.export_other()
+    assert app.v_status.get().startswith("Can't save the file yet: Stitch length")
+
+
+def test_export_for_another_machine(app, tmp_path, monkeypatch):
+    import pyembroidery
+    app.open(SAMPLE)
+    asked = {}
+
+    def dialog(**k):
+        asked.update(k)
+        return str(tmp_path / "design")                 # typed without an extension
+    monkeypatch.setattr(gui.filedialog, "asksaveasfilename", dialog)
+    app.export_other()
+    assert [t[1] for t in asked["filetypes"]] == ["*.dst", "*.exp", "*.jef", "*.vp3", "*.xxx"]
+    assert pyembroidery.read_dst(str(tmp_path / "design.dst")).count_color_changes() == 4
+    assert "don't store thread colours" in app.v_status.get()
+    assert app._shortcuts["e"][0] == app.export_other
+    monkeypatch.setattr(gui.filedialog, "asksaveasfilename", lambda **k: str(tmp_path / "d.jef"))
+    app.export_other()
+    assert len(pyembroidery.read_jef(str(tmp_path / "d.jef")).threadlist) == 5
+    assert "thread colours" not in app.v_status.get()
 
 
 def _red_square_png(tmp_path):

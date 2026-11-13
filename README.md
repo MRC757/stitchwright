@@ -5,7 +5,9 @@ design, choosing threads, filling shapes, lettering and previewing the stitches.
 
 Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). It reads SVG artwork,
 pictures (PNG/JPEG) and existing embroidery files. It sews run-stitch outlines, satin columns
-and filled areas (tatami fill with underlay).
+and filled areas (tatami fill with underlay). Designs can also be exported for other makes of
+machine: DST (Tajima, read by most machines), EXP (Melco, Bernina), JEF (Janome), VP3
+(Pfaff, Husqvarna Viking) and XXX (Singer).
 
 Stitchwright was called *svg2pes* before version 0.2.1.
 
@@ -59,8 +61,8 @@ Stitchwright was called *svg2pes* before version 0.2.1.
 **Checking**
 - A zoomable stitch preview showing each stitch and needle point, and a sew-out simulation
   that stitches the design in machine order and stops at each colour change.
-- Checks that everything fits inside the hoop and its margin, and checks each saved PES file
-  by reading it back.
+- Checks that everything fits inside the hoop and its margin, and checks each saved file
+  (PES or another machine's format) by reading it back.
 
 There is a desktop window (also as a single Windows `.exe`) and a command line. Both use the
 same conversion code. See [Future features](#future-features) for what's planned next.
@@ -190,6 +192,11 @@ The preview is drawn from the stitches that will be saved, not from the artwork.
 - **Save PES…** (Ctrl+S) writes the file for the machine and suggests a short name without
   spaces for the USB stick. If it can't save yet (nothing open, or a setting the planner
   refuses), the status bar says why.
+- **Export for another machine…** (Ctrl+E, File menu) saves as DST, EXP, JEF, VP3 or XXX
+  instead, for machines that don't read PES. Pick the format in the dialog's file-type list.
+  DST and EXP files don't store thread colours, only the colour stops: the machine asks for
+  each thread, and the status bar says how many changes there are. JEF files hold the
+  nearest Janome thread to each colour. Only PES has been sewn so far.
 - Keyboard shortcuts work the same with Caps Lock on.
 
 ## Using the command line
@@ -222,6 +229,7 @@ The preview is drawn from the stitches that will be saved, not from the artwork.
 | `--svg-dpi DPI` | the SVG's own units per inch, e.g. 72 for Illustrator exports |
 | `--speed SPM` | machine speed for the time estimate (default 650 stitches/min) |
 | `--pes-version 1\|6` | PES format version (default 1, tested on the PE540D) |
+| `-o FILE` | the output file; its extension picks the format: `.pes`, `.dst`, `.exp`, `.jef`, `.vp3` or `.xxx` |
 | `--no-snap` | keep the exact SVG colours instead of Brother threads |
 
 COLOUR can be any of these:
@@ -328,8 +336,8 @@ Finished items are ticked.
 
 ### Machine and output
 - [x] **Sewing-time estimates** for the whole design and each colour stop.
-- [ ] **Other formats:** DST, JEF, EXP and VP3 output (pyembroidery can write them) for other
-      machines.
+- [x] **Other formats:** DST, EXP, JEF, VP3 and XXX output for other machines (File → Export
+      for another machine…).
 - [ ] **Thread estimates:** thread used per colour.
 - [ ] **Printable worksheet:** a page with the design, its size, the colour sequence and the
       thread numbers to have ready at the machine.

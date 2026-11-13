@@ -6,7 +6,8 @@ import pytest
 
 from conftest import RED, SAMPLE, square, write_svg
 from stitchwright.cli import main
-from stitchwright.convert import ConversionError, convert, plan_design, write_pes_file
+from stitchwright.convert import (MACHINE_FORMATS, ConversionError, convert, plan_design,
+                                  write_machine_file, write_pes_file)
 from stitchwright.palette import brother_threads, nearest_brother, parse_color
 from stitchwright.stitching import Settings
 from stitchwright.svg_import import load_svg
@@ -316,3 +317,46 @@ def test_choices_and_the_old_keywords_give_the_same_plan():
     assert c.overrides == {"sun": "Red"}                      # the caller's Choices is not changed
     with pytest.raises(TypeError, match="overides"):
         plan_design(d, overides={"sun": "Red"})               # a typo is still an error
+
+
+# --- other machines' formats ------------------------------------------------------
+
+@pytest.mark.parametrize("ext", [e for e in MACHINE_FORMATS if e != ".pes"])
+def test_other_formats_keep_every_stitch_and_colour_stop(tmp_path, ext):
+    plan = plan_design(load_svg(SAMPLE))
+    out = str(tmp_path / ("design" + ext))
+    rep = write_machine_file(plan, out)
+    assert rep.out_path == out and sorted(os.listdir(tmp_path)) == ["design" + ext]   # no .part left
+    back = pyembroidery.read(out)
+
+    def stitches(p):
+        return [(x, y) for x, y, c in p.stitches if c & 0xFF == pyembroidery.STITCH]
+    planned = stitches(plan.pattern)
+    got = stitches(back)
+    assert len(got) == len(planned)
+    dx, dy = planned[0][0] - got[0][0], planned[0][1] - got[0][1]
+    assert got == [(x - dx, y - dy) for x, y in planned]          # same stitches, moved
+    assert back.count_color_changes() + 1 == rep.color_blocks == 5
+    x0, y0, x1, y1 = back.bounds()
+    assert abs(x0 + x1) <= 1 and abs(y0 + y1) <= 1                # centred on the start point
+    if MACHINE_FORMATS[ext][1]:
+        assert len(back.threadlist) == 5
+
+
+def test_machine_file_format_follows_the_extension(tmp_path):
+    plan = plan_design(load_svg(SAMPLE))
+    write_machine_file(plan, str(tmp_path / "a.PES"))             # any case
+    with open(tmp_path / "a.PES", "rb") as f:
+        assert f.read(8) == b"#PES0001"
+    with pytest.raises(ConversionError, match="Can't write TXT files. Use one of: PES, DST"):
+        write_machine_file(plan, str(tmp_path / "a.txt"))
+    with pytest.raises(ConversionError, match="without an extension"):
+        write_machine_file(plan, str(tmp_path / "noext"))
+    assert sorted(os.listdir(tmp_path)) == ["a.PES"]
+
+
+def test_command_line_writes_the_format_its_output_names(tmp_path):
+    out = str(tmp_path / "d.dst")
+    assert main(["convert", SAMPLE, "-o", out]) == 0
+    assert pyembroidery.read_dst(out).count_color_changes() == 4
+    assert main(["convert", SAMPLE, "-o", str(tmp_path / "d.ai")]) == 2
