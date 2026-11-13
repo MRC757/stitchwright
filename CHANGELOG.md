@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 (2026-11-13)
 
 - **Font list with previews.** In Add text / Edit text, each font's name is shown in that
   font, there is a search box, and pointing at a font shows your text in it in the preview
