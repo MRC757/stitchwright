@@ -108,3 +108,31 @@ PC yet, so the window itself has not been looked at.
   (anti-aliased text).
 
 Next: step B, starting with fixes 1 and 2 (font names and fallbacks).
+
+## Progress
+
+**Step B done (2026-11-15)**, on branch `linux-port`. All tests pass on Windows and on
+Ubuntu (Python 3.10, 3.12, 3.14): 174 tests, the only skips being Wingdings on Linux and the
+`tomllib` lint test on 3.10.
+
+- Fixes 1–2: fonts listed by real name (fc-list, else each font's name table; every
+  `.ttc` face). Missing fonts are replaced by metric-compatible ones (Arial ↔ Liberation
+  Sans / Arimo, ...) or look-alikes, in SVG text and in projects from another computer;
+  the default font is never a maths or symbol font. A font chosen from a file uses its real
+  name.
+- Fix 3: `file_types()` in `dialogs.py`; every file dialog uses it.
+- Fixes 4–8: maximise on X11, log in `~/.local/state/stitchwright`, Button-4/5 only on
+  Tk < 8.7, `STITCHWRIGHT_SCALE` / `GDK_SCALE`, `clam` theme.
+- **Output is byte-identical on Windows and Linux**: `tests/test_reference_output.py`
+  compares PES and DST files of five designs (every fill pattern and outline style) with
+  `tests/reference/`, and passes on both.
+- A wrong turn, undone: Liberation Sans's cap height looked 4% short, but the SVG text test
+  was measuring the dot of the "i". Letter heights still come from the font's stated cap
+  height, so Windows output is unchanged.
+
+**Step C mostly done:** the Ubuntu test job is now required to pass. Still to do: nothing
+for C beyond keeping it green.
+
+**Not yet seen on a real screen** (needs WSL or an Ubuntu desktop): the window's look with
+`clam`, maximising, the mouse wheel, `.PES` files in the dialogs, scaling, anti-aliased
+text. Fix 9 (`.desktop` file) is part of step D.

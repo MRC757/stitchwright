@@ -29,9 +29,7 @@ jobs:
 
   test-linux:
     # Ubuntu: the Linux (.deb) version. Tk tests run on a virtual screen (xvfb).
-    # Not yet required to pass while the Linux port is in progress (docs/LINUX_PORT.md).
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
