@@ -289,37 +289,53 @@ def text_polylines(spec: TextSpec, step_mm: float = 0.3,
 
 
 # --------------------------------------------------------------------- SVG text
-def match_font(family: str | None) -> tuple[str, str, int, bool]:
-    """(name, path, index, exact) of the installed font best matching a CSS family list."""
+GENERIC_FAMILIES = {
+    "sans-serif": ("Arial", "DejaVu Sans"),
+    "serif": ("Times New Roman", "DejaVu Serif"),
+    "monospace": ("Courier New", "DejaVu Sans Mono"),
+    "cursive": ("Comic Sans MS",),
+}
+
+
+def match_font(family: str | None) -> tuple[str, str, int, str]:
+    """(name, path, index, how) of the installed font best matching a CSS family list.
+    how is "exact", "similar" (a font with the same letter widths, e.g. Liberation Sans
+    for Arial) or "default" (nothing matched: the default font)."""
     fonts = installed_fonts()
     lower = {n.lower(): n for n in fonts}
+    similar = None
     for fam in (family or "").split(","):
-        fam = fam.strip().strip("'\"").lower()
+        fam = fam.strip().strip("'\"")
         if not fam:
             continue
-        if fam in lower:
-            n = lower[fam]
-            return n, *fonts[n], True
-        generic = {"sans-serif": "arial", "serif": "times new roman", "monospace": "courier new",
-                   "cursive": "comic sans ms"}.get(fam)
-        if generic and generic in lower:
-            n = lower[generic]
-            return n, *fonts[n], True
-        starts = [n for low, n in lower.items() if low.startswith(fam)]
+        if fam.lower() in GENERIC_FAMILIES:
+            for name in GENERIC_FAMILIES[fam.lower()]:
+                found = find_font(name)
+                if found:
+                    return found[0], found[1], found[2], "exact"
+            continue
+        found = find_font(fam)
+        if found and found[3]:
+            return found[0], found[1], found[2], "exact"
+        starts = [n for low, n in lower.items() if low.startswith(fam.lower())]
         if starts:
             n = min(starts, key=len)
-            return n, *fonts[n], True
+            return n, *fonts[n], "exact"
+        if found and similar is None:          # keep looking: a later family may be installed
+            similar = found
+    if similar:
+        return similar[0], similar[1], similar[2], "similar"
     d = default_font()
     if d is None:
         raise ValueError("No fonts are installed")
-    return d[0], d[1], d[2], False
+    return d[0], d[1], d[2], "default"
 
 
 def text_from_svg(text: str, x: float, y: float, family: str | None, size: float,
                   anchor: str | None, matrix, px_to_mm: float):
     """Convert one SVG <text>: returns (polylines in mm, TextSpec, warning or None).
     x, y and size are in SVG user units; matrix maps user units to px."""
-    name, path, idx, exact = match_font(family)
+    name, path, idx, how = match_font(family)
     a, b, c, d, e, f = (float(v) for v in matrix)
     unit_mm = math.sqrt(abs(a * d - b * c)) * px_to_mm or px_to_mm
     cap_user = size * cap_ratio(path, idx)
@@ -336,7 +352,10 @@ def text_from_svg(text: str, x: float, y: float, family: str | None, size: float
             pts.append(((a * ux + c * uy + e) * px_to_mm, (b * ux + d * uy + f) * px_to_mm))
         out.append(Polyline(pts, pl.closed))
     spec_mm = replace(spec, height_mm=round(cap_user * unit_mm, 2), align="center")
-    warn = None if exact else f"Font '{family}' is not installed; used {name} for \"{text}\""
+    warn = {"exact": None,
+            "similar": f"Font '{family}' is not installed; used the close match {name} "
+                       f"for \"{text}\"",
+            "default": f"Font '{family}' is not installed; used {name} for \"{text}\""}[how]
     if missing:
         warn = (warn + "; " if warn else "") + f"not in {name}: {''.join(missing)}"
     return out, spec_mm, warn
@@ -347,55 +366,198 @@ def _strip_style_suffix(name: str) -> str:
     return re.sub(r"\s*\((TrueType|OpenType|All res)\)\s*$", "", name, flags=re.I).strip()
 
 
+def _clean_face_name(name: str) -> str:
+    """'Lato Regular' -> 'Lato', as Windows names its fonts ('Arial', 'Arial Bold')."""
+    name = " ".join(name.split())
+    if name.lower().endswith(" regular"):
+        name = name[:-len(" regular")]
+    return name
+
+
+def font_faces(path: str) -> list[tuple[str, int]]:
+    """(display name, face index) of each font in a font file, read from its name table:
+    'DejaVu Sans Bold', not the file name 'DejaVuSans-Bold'. A collection (.ttc, .otc)
+    gives one entry per face. Empty if the file can't be read as a font."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+        count = int.from_bytes(head[8:12], "big") if head[:4] == b"ttcf" else 1
+        out = []
+        for i in range(min(count, 64)):
+            with TTFont(path, fontNumber=i, lazy=True) as font:
+                names = font["name"]
+                full = names.getDebugName(4)
+                if not full:
+                    family = names.getDebugName(16) or names.getDebugName(1) or ""
+                    style = names.getDebugName(17) or names.getDebugName(2) or ""
+                    full = f"{family} {style}"
+            full = _clean_face_name(full or "")
+            if full and not full.startswith("."):       # '.LastResort' etc. are hidden fonts
+                out.append((full, i))
+        return out
+    except Exception:                                    # damaged or not a font
+        return []
+
+
+def _parse_fc_list(output: str) -> dict[str, tuple[str, int]]:
+    """Fonts from `fc-list` output in the format _FC_FORMAT asks for."""
+    fonts: dict[str, tuple[str, int]] = {}
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 5:
+            continue
+        path, index, full, family, style = parts
+        if not path.lower().endswith(FONT_EXTENSIONS):  # Type 1, bitmap fonts: no outlines we read
+            continue
+        try:
+            idx = int(index or 0)
+        except ValueError:
+            continue
+        if idx >= 0x10000:                   # a named instance of a variable font: list it once
+            continue
+        name = _clean_face_name(full or f"{family} {style}")
+        if name and not name.startswith("."):
+            fonts.setdefault(name, (path, idx))
+    return fonts
+
+
+_FC_FORMAT = "%{file}\t%{index}\t%{fullname[0]}\t%{family[0]}\t%{style[0]}\n"
+
+
+def _fontconfig_fonts() -> dict[str, tuple[str, int]]:
+    """The fonts fontconfig knows (Linux desktops), or {} if fc-list isn't available."""
+    import subprocess
+    try:
+        out = subprocess.run(["fc-list", "--format", _FC_FORMAT], capture_output=True,
+                             text=True, encoding="utf-8", errors="replace", timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    return _parse_fc_list(out.stdout) if out.returncode == 0 else {}
+
+
+FONT_DIRS = ["/usr/share/fonts", "/usr/local/share/fonts", "~/.fonts", "~/.local/share/fonts",
+             "/Library/Fonts", "/System/Library/Fonts", "~/Library/Fonts"]
+
+
+def _scan_font_dirs(dirs) -> dict[str, tuple[str, int]]:
+    """Fonts found by reading every font file under dirs (when fc-list isn't available)."""
+    fonts: dict[str, tuple[str, int]] = {}
+    for d in dirs:
+        for root, _, files in os.walk(os.path.expanduser(d)):
+            for fn in sorted(files):
+                if fn.lower().endswith(FONT_EXTENSIONS):
+                    path = os.path.join(root, fn)
+                    for name, idx in font_faces(path):
+                        fonts.setdefault(name, (path, idx))
+    return fonts
+
+
+def _windows_fonts() -> dict[str, tuple[str, int]]:
+    import winreg
+    fonts: dict[str, tuple[str, int]] = {}
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            key = winreg.OpenKey(hive, key_path)
+        except OSError:
+            continue
+        with key:
+            i = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(key, i)
+                except OSError:
+                    break
+                i += 1
+                if not isinstance(value, str) or not value.lower().endswith(FONT_EXTENSIONS):
+                    continue
+                path = value if os.path.isabs(value) else os.path.join(windir, "Fonts", value)
+                if not os.path.exists(path):
+                    continue
+                for idx, face in enumerate(_strip_style_suffix(name).split(" & ")):
+                    fonts.setdefault(face.strip(), (path, idx))
+    return fonts
+
+
 @functools.lru_cache(maxsize=1)
 def installed_fonts() -> dict[str, tuple[str, int]]:
     """Font display name -> (file path, face index): the built-in single-line fonts,
-    then the fonts installed on this computer."""
-    fonts: dict[str, tuple[str, int]] = {}
+    then the fonts installed on this computer, by their real names ('DejaVu Sans Bold')."""
     if sys.platform == "win32":
-        import winreg
-        windir = os.environ.get("WINDIR", r"C:\Windows")
-        key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
-        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-            try:
-                key = winreg.OpenKey(hive, key_path)
-            except OSError:
-                continue
-            with key:
-                i = 0
-                while True:
-                    try:
-                        name, value, _ = winreg.EnumValue(key, i)
-                    except OSError:
-                        break
-                    i += 1
-                    if not isinstance(value, str) or not value.lower().endswith(FONT_EXTENSIONS):
-                        continue
-                    path = value if os.path.isabs(value) else os.path.join(windir, "Fonts", value)
-                    if not os.path.exists(path):
-                        continue
-                    for idx, face in enumerate(_strip_style_suffix(name).split(" & ")):
-                        fonts.setdefault(face.strip(), (path, idx))
+        fonts = _windows_fonts()
     else:
-        dirs = ["/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.fonts"),
-                os.path.expanduser("~/.local/share/fonts"), "/Library/Fonts",
-                "/System/Library/Fonts", os.path.expanduser("~/Library/Fonts")]
-        for d in dirs:
-            for root, _, files in os.walk(d):
-                for fn in files:
-                    if fn.lower().endswith(FONT_EXTENSIONS):
-                        fonts.setdefault(os.path.splitext(fn)[0], (os.path.join(root, fn), 0))
+        fonts = _fontconfig_fonts() or _scan_font_dirs(FONT_DIRS)
     single = {n: (HERSHEY_PREFIX + fid, 0) for n, fid in SINGLE_LINE_FONTS.items()}
     return {**single, **dict(sorted(fonts.items(), key=lambda kv: kv[0].lower()))}
+
+
+# Fonts with the same letter widths, so text set in one keeps its size in another:
+# Windows fonts and the free fonts Linux has in their place.
+METRIC_EQUIVALENTS = [
+    ("Arial", "Liberation Sans", "Arimo", "Helvetica"),
+    ("Times New Roman", "Liberation Serif", "Tinos", "Times"),
+    ("Courier New", "Liberation Mono", "Cousine", "Courier"),
+    ("Calibri", "Carlito"),
+    ("Cambria", "Caladea"),
+    ("Arial Narrow", "Liberation Sans Narrow"),
+]
+# Close in look, not in widths: tried after the equivalents
+LOOKALIKES = {
+    "segoe ui": ("Noto Sans", "Ubuntu", "DejaVu Sans"),
+    "verdana": ("DejaVu Sans",),
+    "tahoma": ("DejaVu Sans",),
+    "georgia": ("Gelasio", "DejaVu Serif"),
+    "comic sans ms": ("Comic Neue",),
+    "consolas": ("DejaVu Sans Mono", "Ubuntu Mono"),
+}
+_STYLE_SUFFIX = re.compile(
+    r"\s+((?:(?:bold|italic|oblique|light|medium|semibold|black)\s*)+)$", re.I)
+
+
+def font_alternatives(name: str) -> list[str]:
+    """Other names to try when the font `name` isn't installed, best first:
+    'Arial Bold' -> ['Liberation Sans Bold', 'Arimo Bold', 'Helvetica Bold']."""
+    m = _STYLE_SUFFIX.search(name)
+    base, style = (name[:m.start()], " " + m.group(1).strip()) if m else (name, "")
+    low = base.strip().lower()
+    out: list[str] = []
+    for group in METRIC_EQUIVALENTS:
+        if low in (g.lower() for g in group):
+            out += [g + style for g in group if g.lower() != low]
+    out += [g + style for g in LOOKALIKES.get(low, ())]
+    return out
+
+
+def find_font(name: str) -> tuple[str, str, int, bool] | None:
+    """(installed name, path, index, exact) for the font called `name`: that font, the
+    same name in other capitals, or a font with the same letter widths or look
+    (exact=False). None if none of these is installed."""
+    fonts = installed_fonts()
+    if name in fonts:
+        return name, *fonts[name], True
+    lower = {n.lower(): n for n in fonts}
+    if name.lower() in lower:
+        n = lower[name.lower()]
+        return n, *fonts[n], True
+    for alt in font_alternatives(name):
+        n = lower.get(alt.lower())
+        if n:
+            return n, *fonts[n], False
+    return None
+
+
+DEFAULT_FONTS = ("Arial", "Liberation Sans", "Arimo", "Helvetica", "Segoe UI", "Noto Sans",
+                 "DejaVu Sans", "Ubuntu")
 
 
 def default_font() -> tuple[str, str, int] | None:
     """(name, path, index) of a sensible default outline font, or None if none are found."""
     fonts = installed_fonts()
-    for name in ("Arial", "Segoe UI", "Helvetica", "DejaVu Sans", "Liberation Sans"):
+    for name in DEFAULT_FONTS:
         if name in fonts:
             return (name, *fonts[name])
-    for name, (path, idx) in fonts.items():
-        if not path.startswith(HERSHEY_PREFIX):
-            return (name, path, idx)
-    return None
+    outline = [(n, p, i) for n, (p, i) in fonts.items() if not p.startswith(HERSHEY_PREFIX)]
+    # plain text fonts first: not maths, symbol or emoji fonts
+    plain = [f for f in outline if not re.search(r"math|symbol|emoji|dings", f[0], re.I)]
+    return (plain or outline or [None])[0]

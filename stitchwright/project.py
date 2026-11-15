@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field, fields, replace
 
 from .fill import FillSpec, SatinSpec
 from .svg_import import DesignObject, Polyline
-from .text import HERSHEY_PREFIX, TextSpec, installed_fonts
+from .text import HERSHEY_PREFIX, TextSpec, find_font
 
 FORMAT = "stitchwright-project"
 VERSION = 1
@@ -138,9 +138,13 @@ def _portable_font(spec: TextSpec, warnings: list[str]) -> TextSpec:
     (the text's stitched outlines are stored, so it still sews) and warn."""
     if spec.font_path.startswith(HERSHEY_PREFIX) or os.path.exists(spec.font_path):
         return spec
-    found = installed_fonts().get(spec.font_name)
+    found = find_font(spec.font_name) if spec.font_name else None
     if found:
-        return replace(spec, font_path=found[0], font_index=found[1])
+        name, path, idx, exact = found
+        if not exact:      # e.g. Arial saved on Windows, Liberation Sans (same widths) on Linux
+            warnings.append(f"Font '{spec.font_name}' is not installed here: editing its text "
+                            f"will use the close match {name}")
+        return replace(spec, font_path=path, font_name=name, font_index=idx)
     warnings.append(f"Font '{spec.font_name or os.path.basename(spec.font_path)}' is not "
                     f"installed here: its text still sews as saved, but editing it will use "
                     f"another font")

@@ -1,3 +1,4 @@
 * text=auto
 *.pes binary
 *.png binary
+*.dst binary

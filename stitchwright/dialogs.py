@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import tkinter as tk
 from dataclasses import replace
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 
 from PIL import Image, ImageTk
@@ -17,11 +18,33 @@ from .geometry import bounds
 from .image_import import TraceSettings
 from .image_import import preview as image_preview
 from .palette import Thread, brother_threads, nearest_brother, thread_for_rgb, to_hex
-from .text import HERSHEY_PREFIX, TextSpec, default_font, installed_fonts, text_polylines
+from .text import (HERSHEY_PREFIX, TextSpec, default_font, font_faces, installed_fonts,
+                   text_polylines)
 
 OK_COLOUR, WARN_COLOUR, ERROR_COLOUR = "#2e7d32", "#9a6700", "#c62828"
 SELECT_COLOUR = "#1a73e8"
 
+
+def file_types(types, platform: str = sys.platform) -> list[tuple[str, str]]:
+    """filetypes for Tk's file dialogs. Windows matches extensions in any case; Linux's
+    dialog is case-sensitive, so 'Heart.PES' needs '*.PES' as well as '*.pes', and it
+    reads '*.*' as 'names with a dot', so 'All files' is '*' there."""
+    if platform == "win32":
+        return list(types)
+    out = []
+    for label, patterns in types:
+        pats = []
+        for p in patterns.split():
+            for q in (("*",) if p == "*.*" else (p, p.upper())):
+                if q not in pats:
+                    pats.append(q)
+        out.append((label, " ".join(pats)))
+    return out
+
+
+# Tk 8.6 on Linux reports the mouse wheel as buttons 4 and 5; Tk 8.7 and 9 send
+# <MouseWheel> instead, so binding both there would scroll twice per notch.
+X11_WHEEL_BUTTONS = sys.platform != "win32" and tk.TkVersion < 8.7
 
 _FONTS: dict = {}
 
@@ -169,8 +192,9 @@ class FontList(ttk.Frame):
         self.v_search.trace_add("write", lambda *a: self._filter())
         self.cv.bind("<Configure>", lambda e: self._layout())
         self.cv.bind("<MouseWheel>", self._wheel)
-        self.cv.bind("<Button-4>", lambda e: self._scroll(-3))       # mouse wheel on Linux
-        self.cv.bind("<Button-5>", lambda e: self._scroll(3))
+        if X11_WHEEL_BUTTONS:                                        # mouse wheel on Linux
+            self.cv.bind("<Button-4>", lambda e: self._scroll(-3))
+            self.cv.bind("<Button-5>", lambda e: self._scroll(3))
         self.cv.bind("<Button-1>", self._click)
         self.cv.bind("<Motion>", self._motion)
         self.cv.bind("<Leave>", lambda e: self._set_hover(None))
@@ -428,10 +452,14 @@ class TextDialog(tk.Toplevel):
     def _browse(self):
         path = filedialog.askopenfilename(
             parent=self, title="Choose a font file",
-            filetypes=[("Fonts", "*.ttf *.otf *.ttc *.otc"), ("All files", "*.*")])
+            filetypes=file_types([("Fonts", "*.ttf *.otf *.ttc *.otc"), ("All files", "*.*")]))
         if path:
-            name = os.path.splitext(os.path.basename(path))[0]
-            self.fonts[name] = (path, 0)
+            faces = font_faces(path)
+            if not faces:
+                messagebox.showerror("Font", "That file can't be read as a font.", parent=self)
+                return
+            name, idx = faces[0]
+            self.fonts[name] = (path, idx)
             if name not in self.names:
                 self.names.append(name)
             self.font_list.add(name)          # chooses it, which updates v_font and the preview

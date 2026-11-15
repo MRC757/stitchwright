@@ -25,7 +25,8 @@ from PIL import Image, ImageTk
 from . import __version__
 from .convert import MACHINE_FORMATS, ConversionError, Plan, format_minutes, write_machine_file
 from .dialogs import (ERROR_COLOUR, OK_COLOUR, SELECT_COLOUR, WARN_COLOUR, FillDialog,
-                      ImageDialog, TextDialog, ThreadPicker, swatch, ui_font)
+                      ImageDialog, TextDialog, ThreadPicker, X11_WHEEL_BUTTONS, file_types,
+                      swatch, ui_font)
 from .document import DocError, Document, PlanResult
 from .geometry import (Affine, apply, bounds, point_in_polygon, polygon_area, rotate, scale,
                        segment_distance, translate)
@@ -150,8 +151,14 @@ class App:
         w, h = min(want_w, sw - 40), min(want_h, avail_h - frame)
         r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{top + max(0, (avail_h - frame - h) // 2)}")
         r.minsize(min(int(900 * ui), sw - 40), min(int(560 * ui), avail_h - frame))
-        if sys.platform == "win32" and (w < want_w or h < want_h):
-            r.state("zoomed")
+        if w < want_w or h < want_h:
+            try:
+                if sys.platform == "win32":
+                    r.state("zoomed")
+                elif r.tk.call("tk", "windowingsystem") == "x11":
+                    r.attributes("-zoomed", True)
+            except tk.TclError:
+                pass
         style = ttk.Style(r)
         style.configure("Treeview", rowheight=int(22 * ui))
 
@@ -353,8 +360,9 @@ class App:
         self.canvas.bind("<space>", lambda e: self.toggle_skip())
         # zoom and pan
         self.canvas.bind("<MouseWheel>", self.on_wheel)
-        self.canvas.bind("<Button-4>", lambda e: self.zoom_at(1.25, e.x, e.y))   # Linux
-        self.canvas.bind("<Button-5>", lambda e: self.zoom_at(0.8, e.x, e.y))
+        if X11_WHEEL_BUTTONS:                  # Linux with Tk 8.6: the wheel is buttons 4 and 5
+            self.canvas.bind("<Button-4>", lambda e: self.zoom_at(1.25, e.x, e.y))
+            self.canvas.bind("<Button-5>", lambda e: self.zoom_at(0.8, e.x, e.y))
         for b in (2, 3):
             self.canvas.bind(f"<ButtonPress-{b}>", self.pan_start)
             self.canvas.bind(f"<B{b}-Motion>", self.pan_move)
@@ -638,7 +646,7 @@ class App:
         if not self._confirm_discard():
             return
         path = filedialog.askopenfilename(parent=self.root, title="Open a design",
-                                          filetypes=self.OPEN_TYPES)
+                                          filetypes=file_types(self.OPEN_TYPES))
         if path:
             self.open(path)
 
@@ -717,8 +725,8 @@ class App:
 
     def ask_import(self):
         path = filedialog.askopenfilename(parent=self.root, title="Import into this design",
-                                          filetypes=[t for t in self.OPEN_TYPES
-                                                     if t[0] != PROJECTS_LABEL])
+                                          filetypes=file_types([t for t in self.OPEN_TYPES
+                                                                if t[0] != PROJECTS_LABEL]))
         if path:
             self.import_file(path)
 
@@ -769,7 +777,7 @@ class App:
             path = filedialog.asksaveasfilename(
                 parent=self.root, title="Save project", defaultextension=PROJECT_EXTENSION,
                 initialfile=base + PROJECT_EXTENSION, initialdir=folder,
-                filetypes=[("Stitchwright project", "*" + PROJECT_EXTENSION)])
+                filetypes=file_types([("Stitchwright project", "*" + PROJECT_EXTENSION)]))
             if not path:
                 return False
         try:
@@ -835,7 +843,8 @@ class App:
     def ask_import_image(self):
         path = filedialog.askopenfilename(
             parent=self.root, title="Import a picture",
-            filetypes=[("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"), ("All files", "*.*")])
+            filetypes=file_types([("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"),
+                                  ("All files", "*.*")]))
         if path:
             self.import_image(path)
 
@@ -918,7 +927,7 @@ class App:
         path = filedialog.asksaveasfilename(
             parent=self.root, title=title, defaultextension=exts[0],
             initialfile=short + exts[0], initialdir=folder,
-            filetypes=[(MACHINE_FORMATS[e][0], "*" + e) for e in exts])
+            filetypes=file_types([(MACHINE_FORMATS[e][0], "*" + e) for e in exts]))
         if not path:
             return
         ext = os.path.splitext(path)[1].lower()
@@ -1851,6 +1860,34 @@ class App:
         self.handles["rot"] = (rx, ry)
 
 
+def ui_scale_override(env=os.environ) -> float | None:
+    """A screen scale asked for in the environment: STITCHWRIGHT_SCALE (e.g. 1.5), else
+    GDK_SCALE (the whole-number scale GTK apps use). None if neither is set or valid."""
+    for var in ("STITCHWRIGHT_SCALE", "GDK_SCALE"):
+        try:
+            v = float(env.get(var, ""))
+        except ValueError:
+            continue
+        if 0.5 <= v <= 4:
+            return v
+    return None
+
+
+def setup_linux_look(root: tk.Tk) -> None:
+    """Linux (X11): the 'clam' theme (Tk's default X11 look is from the 1990s) and the
+    screen scale. Tk on Linux usually assumes 96 dpi even on high-resolution screens, so
+    STITCHWRIGHT_SCALE or GDK_SCALE can make everything bigger."""
+    try:
+        style = ttk.Style(root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        scale = ui_scale_override()
+        if scale:
+            root.tk.call("tk", "scaling", scale * 96 / 72)    # Tk's unit: pixels per point
+    except tk.TclError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if sys.platform == "win32":
@@ -1861,6 +1898,8 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, OSError):
             pass
     root = tk.Tk()
+    if sys.platform != "win32":
+        setup_linux_look(root)
     assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
     try:
         if sys.platform == "win32":

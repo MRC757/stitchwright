@@ -138,6 +138,27 @@ def test_project_fonts_are_found_by_name_on_another_computer(tmp_path):
         other.edit_text("text2", replace_text(p.texts["text2"], "Yes"))
 
 
+def test_project_from_windows_uses_a_font_with_the_same_widths_on_linux(tmp_path, monkeypatch):
+    from stitchwright import text
+    from stitchwright.document import Document
+    from stitchwright.project import load_project, save_project
+    from stitchwright.text import TextSpec
+    name, path, idx = __import__("conftest").any_font()
+    doc = Document()
+    import json
+    doc.add_text(TextSpec("Hi", path, "Arial", idx, 8))
+    proj = str(tmp_path / "p.stitchwright")
+    save_project(proj, doc.to_project({}))
+    data = json.load(open(proj, encoding="utf-8"))          # as saved on a Windows PC
+    data["texts"]["text1"]["font_path"] = "Z:/Windows/Fonts/arial.ttf"
+    json.dump(data, open(proj, "w", encoding="utf-8"))
+    monkeypatch.setattr(text, "installed_fonts", lambda: {"Liberation Sans": (path, idx)})
+    p = load_project(proj)
+    spec = p.texts["text1"]
+    assert (spec.font_name, spec.font_path, spec.font_index) == ("Liberation Sans", path, idx)
+    assert any("close match Liberation Sans" in w for w in p.warnings)
+
+
 def replace_text(spec, text):
     from dataclasses import replace
     return replace(spec, text=text)

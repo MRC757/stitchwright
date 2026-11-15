@@ -57,6 +57,7 @@ def test_bad_font_is_a_clear_error(tmp_path):
 
 def test_svg_text_is_stitched_with_the_matching_font(tmp_path):
     from stitchwright.geometry import bounds
+    from stitchwright.text import cap_ratio
     any_font()
     p = tmp_path / "t.svg"
     p.write_text(TEXT_SVG)
@@ -66,8 +67,10 @@ def test_svg_text_is_stitched_with_the_matching_font(tmp_path):
     x0, y0, x1, y1 = bounds([q for pl in hi.polylines for q in pl.points])
     assert x0 == pytest.approx(10, abs=1.2)            # starts at x = 10 (plus the H's bearing)
     assert y1 == pytest.approx(20, abs=0.05)           # sits on the baseline y = 20
-    assert y1 - y0 == pytest.approx(10 * 0.716, abs=0.3)   # Arial's capitals are 0.716 em
-    assert d.texts[hi.obj_id].font_name == "Arial"
+    spec = d.texts[hi.obj_id]
+    # Arial, or on Linux a font with Arial's letter widths
+    assert spec.font_name in ("Arial", "Liberation Sans", "Arimo")
+    assert y1 - y0 == pytest.approx(10 * cap_ratio(spec.font_path, spec.font_index), abs=0.05)
     mx0, _, mx1, _ = bounds([q for pl in mid.polylines for q in pl.points])
     assert (mx0 + mx1) / 2 == pytest.approx(30, abs=0.6)   # text-anchor: middle
     assert any("NoSuchFont" in w for w in d.warnings)
@@ -164,3 +167,71 @@ def test_text_dialog_lists_fonts_drawn_in_themselves_and_previews_before_choosin
         assert fl.shown == [] and dlg.v_font.get() == chosen
     finally:
         dlg.destroy()
+
+
+# --- finding fonts (Windows and Linux) ----------------------------------------------
+
+
+def test_font_files_are_named_by_their_real_name_not_the_file_name(tmp_path):
+    import shutil
+    from stitchwright.text import _scan_font_dirs, font_faces
+    name, path, idx = any_font()
+    assert font_faces(path)[idx][0] == name          # the name the font list shows
+    copy = tmp_path / "Some-File_Name.ttf"
+    shutil.copy(path, copy)
+    assert _scan_font_dirs([str(tmp_path)])[name] == (str(copy), idx)
+    (tmp_path / "broken.ttf").write_bytes(b"not a font")
+    assert font_faces(str(tmp_path / "broken.ttf")) == []
+
+
+def test_fontconfig_list_is_read_by_full_name():
+    from stitchwright.text import _parse_fc_list
+    rows = [
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "0", "DejaVu Sans Bold",
+         "DejaVu Sans", "Bold"),
+        ("/usr/share/fonts/truetype/lato/Lato-Regular.ttf", "0", "Lato Regular", "Lato", "Regular"),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK.ttc", "2", "Noto Sans CJK JP",
+         "Noto Sans CJK JP", "Regular"),
+        ("/usr/share/fonts/truetype/var/Roboto[wght].ttf", "0", "", "Roboto", "Regular"),
+        ("/usr/share/fonts/truetype/var/Roboto[wght].ttf", "65537", "Roboto Thin", "Roboto", "Thin"),
+        ("/usr/share/fonts/X11/misc/6x13.pcf.gz", "0", "Fixed", "Fixed", "Regular"),
+        ("garbage line",),
+    ]
+    out = "\n".join("\t".join(r) for r in rows)
+    assert _parse_fc_list(out) == {
+        "DejaVu Sans Bold": ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+        "Lato": ("/usr/share/fonts/truetype/lato/Lato-Regular.ttf", 0),
+        "Noto Sans CJK JP": ("/usr/share/fonts/opentype/noto/NotoSansCJK.ttc", 2),
+        "Roboto": ("/usr/share/fonts/truetype/var/Roboto[wght].ttf", 0),
+    }
+
+
+def test_windows_fonts_have_linux_stand_ins_with_the_same_widths():
+    from stitchwright.text import font_alternatives
+    assert font_alternatives("Arial Bold")[0] == "Liberation Sans Bold"
+    assert "Arial" in font_alternatives("Liberation Sans")       # and back again on Windows
+    assert font_alternatives("times new roman")[0] == "Liberation Serif"
+    assert "DejaVu Sans" in font_alternatives("Segoe UI")
+    assert font_alternatives("Some Font Nobody Has") == []
+
+
+def test_missing_fonts_are_replaced_by_a_close_match(monkeypatch, tmp_path):
+    from stitchwright import text
+    fonts = {"Single-line Sans": ("hershey:futural", 0),
+             "DejaVu Math TeX Gyre": ("/f/DejaVuMathTeXGyre.ttf", 0),
+             "Lato": ("/f/Lato-Regular.ttf", 0),
+             "Liberation Sans": ("/f/LiberationSans-Regular.ttf", 0),
+             "Liberation Sans Bold": ("/f/LiberationSans-Bold.ttf", 0)}
+    monkeypatch.setattr(text, "installed_fonts", lambda: fonts)
+    assert text.find_font("Arial") == ("Liberation Sans", "/f/LiberationSans-Regular.ttf", 0, False)
+    assert text.find_font("Arial Bold")[0] == "Liberation Sans Bold"
+    assert text.find_font("lato") == ("Lato", "/f/Lato-Regular.ttf", 0, True)
+    assert text.find_font("Wingdings") is None
+    assert text.match_font("Arial")[3] == "similar"
+    assert text.match_font("NoSuchFont, Arial")[3] == "similar"
+    assert text.match_font("NoSuchFont, Lato")[:2] == ("Lato", "/f/Lato-Regular.ttf")
+    assert text.match_font("sans-serif")[0] == "Liberation Sans"
+    assert text.default_font()[0] == "Liberation Sans"
+    del fonts["Liberation Sans"], fonts["Liberation Sans Bold"]
+    assert text.default_font()[0] == "Lato"              # not the maths font, not single-line
+    assert text.match_font("NoSuchFont")[3] == "default"

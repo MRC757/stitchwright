@@ -1,7 +1,9 @@
 """Logging to a file, so problems in the window app (which has no console) can be reported.
 
-The log lives in %LOCALAPPDATA%\\stitchwright\\stitchwright.log on Windows, ~/.stitchwright/stitchwright.log
-elsewhere (or the temp folder if neither can be written), and rotates at about 1 MB.
+The log lives in %LOCALAPPDATA%\\stitchwright\\stitchwright.log on Windows,
+~/.local/state/stitchwright/stitchwright.log on Linux ($XDG_STATE_HOME), and
+~/.stitchwright/stitchwright.log elsewhere (or the temp folder if none of these can be
+written). It rotates at about 1 MB.
 """
 from __future__ import annotations
 
@@ -18,6 +20,10 @@ log = logging.getLogger("stitchwright")
 def default_log_dir() -> str:
     if sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
         return os.path.join(os.environ["LOCALAPPDATA"], "stitchwright")
+    if sys.platform.startswith("linux"):
+        state = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"),
+                                                                 ".local", "state")
+        return os.path.join(state, "stitchwright")
     return os.path.join(os.path.expanduser("~"), ".stitchwright")
 
 
