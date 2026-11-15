@@ -139,22 +139,14 @@ jobs:
           path: ${{ runner.temp }}/window.png
 
   build-exe:
-    # on version tags (v0.2.2, ...): build the Windows app and publish it as a GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # The Windows app, on every push (so the build is known to work before a release)
     needs: test
     runs-on: windows-latest
-    permissions:
-      contents: write   # to create the release
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Tag must match the package version
-        shell: pwsh
-        run: |
-          $v = python -c "import stitchwright; print(stitchwright.__version__)"
-          if ("v$v" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} does not match version $v in stitchwright/__init__.py" }
       - name: Build stitchwright.exe
         shell: pwsh
         run: ./build_exe.ps1
@@ -162,9 +154,40 @@ jobs:
         with:
           name: stitchwright-exe
           path: dist/stitchwright.exe
+
+  release:
+    # Both downloads on one GitHub Release. Publishes only for version tags (v0.3.0, ...);
+    # on other pushes it is a dry run that shows what would be published.
+    needs: [build-exe, build-deb, deb-on-24-04]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create the release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          path: release
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          version=$(python3 -c "import stitchwright; print(stitchwright.__version__)")
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          ls -l release
+          test -f release/stitchwright.exe
+          test -f "release/stitchwright_${version}_amd64.deb"
+          python3 packaging/release_notes.py "$version" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      - name: Tag must match the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "v$VERSION" != "${{ github.ref_name }}" ]; then
+            echo "tag ${{ github.ref_name }} does not match version $VERSION in stitchwright/__init__.py"; exit 1
+          fi
       - name: Publish the release
-        shell: pwsh
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/stitchwright.exe --title "Stitchwright ${{ github.ref_name }}" --notes "Windows app: download stitchwright.exe below and double-click it. See CHANGELOG.md for what changed." --verify-tag
+          files=(release/stitchwright.exe "release/stitchwright_${VERSION}_amd64.deb")
+          gh release create "${{ github.ref_name }}" "${files[@]}" --verify-tag \
+            --title "Stitchwright ${{ github.ref_name }}" --notes-file "$RUNNER_TEMP/notes.md"
