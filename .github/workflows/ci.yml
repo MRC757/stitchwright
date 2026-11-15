@@ -27,6 +27,45 @@ jobs:
       - name: Tests
         run: python -m pytest -q
 
+  test-linux:
+    # Ubuntu: the Linux (.deb) version. Tk tests run on a virtual screen (xvfb).
+    # Not yet required to pass while the Linux port is in progress (docs/LINUX_PORT.md).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-liberation fonts-dejavu-core
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Environment report
+        run: |
+          xvfb-run -a python - <<'EOF'
+          import sys, tkinter as tk
+          from stitchwright.text import installed_fonts, default_font
+          r = tk.Tk()
+          print("Python", sys.version)
+          print("Tk", r.call("info", "patchlevel"), "| dpi", r.winfo_fpixels("1i"),
+                "| themes", r.call("ttk::style", "theme", "names"))
+          fonts = installed_fonts()
+          print(len(fonts), "fonts; default:", default_font())
+          for n, (p, i) in list(fonts.items())[:40]:
+              print("  ", n, "->", p, i)
+          EOF
+      - name: pyflakes
+        if: always()
+        run: python -m pyflakes stitchwright tests
+      - name: Tests
+        if: always()
+        run: xvfb-run -a python -m pytest -q -rfEs
+
   build-exe:
     # on version tags (v0.2.2, ...): build the Windows app and publish it as a GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
