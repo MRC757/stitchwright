@@ -15,8 +15,10 @@ a = Analysis(
     ["stitchwright.pyw" if WINDOWS else "packaging/linux/launcher.py"],
     pathex=["."],
     datas=[("stitchwright/assets", "stitchwright/assets")],
-    # fontTools imports its font-table modules by name at run time
-    hiddenimports=collect_submodules("fontTools.ttLib.tables") + ["HersheyFonts"],
+    # fontTools imports its font-table modules by name at run time; Pillow's ImageTk needs
+    # _tkinter_finder on Linux (without it every picture in the window fails)
+    hiddenimports=collect_submodules("fontTools.ttLib.tables") + ["HersheyFonts",
+                                                                  "PIL._tkinter_finder"],
     excludes=["pytest", "matplotlib", "scipy", "pandas", "IPython"],
     noarchive=False,
 )
