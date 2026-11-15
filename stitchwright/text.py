@@ -21,7 +21,6 @@ import sys
 from dataclasses import dataclass, replace
 
 from fontTools.pens.basePen import BasePen
-from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
@@ -137,24 +136,9 @@ def _outline_font(spec: TextSpec):
         hhea = font["hhea"]
     except Exception as e:  # fontTools raises many types for broken fonts
         raise ValueError(f"Cannot read font {os.path.basename(spec.font_path)}: {e}") from e
-    return cmap, glyphs, upem, hhea, _cap_height(font, cmap, glyphs, upem)
-
-
-def _cap_height(font, cmap, glyphs, upem) -> float:
-    """Height of the capitals in font units: the top of the 'H' as drawn. The OS/2 table's
-    sCapHeight is only the fallback, as some fonts get it wrong (Liberation Sans says
-    1409 units; its H is 1466 tall, like Arial's)."""
-    g = cmap.get(ord("H"))
-    if g:
-        try:
-            pen = BoundsPen(glyphs)
-            glyphs[g].draw(pen)
-            if pen.bounds and pen.bounds[3] > 0:
-                return pen.bounds[3]
-        except Exception:                     # an unusual glyph: use the table instead
-            pass
     os2 = font["OS/2"] if "OS/2" in font else None
-    return getattr(os2, "sCapHeight", 0) or 0.7 * upem
+    cap = getattr(os2, "sCapHeight", 0) or 0.7 * upem
+    return cmap, glyphs, upem, hhea, cap
 
 
 def cap_ratio(path: str, index: int = 0) -> float:

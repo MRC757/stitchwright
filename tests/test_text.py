@@ -70,7 +70,10 @@ def test_svg_text_is_stitched_with_the_matching_font(tmp_path):
     spec = d.texts[hi.obj_id]
     # Arial, or on Linux a font with Arial's letter widths
     assert spec.font_name in ("Arial", "Liberation Sans", "Arimo")
-    assert y1 - y0 == pytest.approx(10 * cap_ratio(spec.font_path, spec.font_index), abs=0.05)
+    # "Hi" is as tall as the capitals or the dot of the i, whichever is higher (Arial: both
+    # 0.716 em; Liberation Sans: capitals 0.688 em, the dot 0.725 em)
+    cap = 10 * cap_ratio(spec.font_path, spec.font_index)
+    assert cap - 0.05 <= y1 - y0 <= cap * 1.06
     mx0, _, mx1, _ = bounds([q for pl in mid.polylines for q in pl.points])
     assert (mx0 + mx1) / 2 == pytest.approx(30, abs=0.6)   # text-anchor: middle
     assert any("NoSuchFont" in w for w in d.warnings)
