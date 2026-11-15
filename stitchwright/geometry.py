@@ -228,4 +228,9 @@ def winding_number(p: Point, pts) -> int:
 
 def polygon_area(pts) -> float:
     """Area enclosed by a closed polyline (first point repeated at the end)."""
-    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:]))) / 2
+    return abs(signed_area(pts))
+
+
+def signed_area(pts) -> float:
+    """polygon_area, positive when the points run clockwise on screen (y down)."""
+    return sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:])) / 2

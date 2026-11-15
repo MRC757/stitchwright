@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **More stitch patterns.** Fills can now be sewn as **contour** (rings that follow the
+  outline, spiralling inwards), **diamonds** or **waves** (rows whose needle drops line up into
+  the pattern) or **criss-cross** (two layers of rows at right angles), as well as plain rows.
+  Outlines can be **bean** (triple run), **zigzag** or **blanket** (prongs pointing into the
+  shape, for appliqué), as well as run stitch and satin. Choose them in *Fill / outline…*, or
+  with `--fill-pattern`, `--pattern-size` and `--outline OBJECT=STYLE[:WIDTH]` on the command
+  line. Projects keep them; older versions open such projects with plain rows and satin.
+- Joins between fill pieces whose ends almost touch no longer make a stitch shorter than
+  0.4 mm.
+
 ## 0.2.6 (2026-11-14)
 
 - **Far fewer jumps in fills.** A winding fill (script lettering, a traced monogram) is cut

@@ -956,12 +956,15 @@ class App:
             outline = "(no outline)" if oid in self.doc.no_outline else \
                 (f"{t.number}  {t.name}" if t else to_hex(rgb))
             if oid in self.doc.satins and oid not in self.doc.no_outline:
-                outline += f"  (satin {self.doc.satins[oid].width:g})"
+                sp = self.doc.satins[oid]
+                outline += f"  ({sp.style})" if sp.style == "bean" else                     f"  ({sp.style} {sp.width:g})"
             fill = "—"
             if oid in self.doc.fills:
                 frgb = self.doc.fills[oid].color or rgb
                 ft = thread_for_rgb(frgb)
                 fill = f"{ft.number}  {ft.name}" if ft else to_hex(frgb)
+                if self.doc.fills[oid].pattern != "rows":
+                    fill += f"  ({self.doc.fills[oid].pattern})"
             if oid in self.doc.texts:
                 first = self.doc.texts[oid].text.strip().split("\n")[0]
                 kind = f"Text “{first[:16]}{'…' if len(first) > 16 else ''}”"

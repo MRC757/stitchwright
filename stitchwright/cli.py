@@ -6,7 +6,7 @@ import sys
 
 from .convert import (Choices, ConversionError, Settings, convert, describe_objects,
                       format_minutes)
-from .fill import FillSpec
+from .fill import FILL_PATTERNS, OUTLINE_STYLES, FillSpec, SatinSpec, outline_spec
 from .palette import brother_threads, to_hex
 from .svg_import import load_svg
 
@@ -38,6 +38,31 @@ def _satins(items: list[str] | None) -> dict[str, float]:
         except ValueError:
             raise SystemExit(f"--satin expects OBJECT or OBJECT=WIDTH, got {it!r}")
     return out
+
+
+def _outlines(items: list[str] | None) -> dict[str, SatinSpec]:
+    """--outline OBJECT=STYLE[:WIDTH] items."""
+    out: dict[str, SatinSpec] = {}
+    styles = ", ".join(OUTLINE_STYLES)
+    for it in items or []:
+        k, _, v = it.partition("=")
+        style, _, width = v.strip().lower().partition(":")
+        if not k.strip() or style not in OUTLINE_STYLES:
+            raise SystemExit(f"--outline expects OBJECT=STYLE or OBJECT=STYLE:WIDTH, with STYLE "
+                             f"one of {styles}; got {it!r}")
+        try:
+            out[k.strip()] = outline_spec(style, float(width) if width.strip() else None)
+        except ValueError:
+            raise SystemExit(f"--outline: the width must be a number, got {it!r}")
+    return out
+
+
+def _fill_angle(a) -> float:
+    """The row angle: as given, else 45 degrees (0 for diamonds and waves, which are
+    drawn across the rows and stand upright with rows at 0)."""
+    if a.fill_angle is not None:
+        return a.fill_angle
+    return 0.0 if a.fill_pattern in ("diamond", "wave") else 45.0
 
 
 def _hoop(text: str) -> tuple[float, float]:
@@ -75,7 +100,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="fill a closed shape (in COLOUR, else its own thread); repeatable")
     p.add_argument("--no-outline", action="append", metavar="OBJECT",
                    help="don't sew this object's outline (e.g. a filled shape); repeatable")
-    p.add_argument("--fill-angle", type=float, default=45.0, help="fill row angle in degrees (default 45)")
+    p.add_argument("--fill-angle", type=float, default=None,
+                   help="fill row angle in degrees (default 45; 0 for diamond and wave patterns)")
+    p.add_argument("--fill-pattern", choices=list(FILL_PATTERNS), default="rows",
+                   help="fill pattern: rows (default), contour (follows the outline), diamond, "
+                        "wave or crosshatch")
+    p.add_argument("--pattern-size", type=float, default=5.0,
+                   help="size of the diamonds or waves in mm (default 5)")
     p.add_argument("--fill-spacing", type=float, default=0.2,
                    help="mm between fill rows, smaller is denser (default 0.2)")
     p.add_argument("--fill-stitch", type=float, default=3.5, help="fill stitch length in mm (default 3.5)")
@@ -86,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="don't cut fills out under filled shapes stacked above")
     p.add_argument("--satin", action="append", metavar="OBJECT[=WIDTH]",
                    help="sew this outline as a satin column, WIDTH mm (default 2); repeatable")
+    p.add_argument("--outline", action="append", metavar="OBJECT=STYLE[:WIDTH]",
+                   help="sew this outline as bean, satin, zigzag or blanket stitch (WIDTH: the "
+                        "column width or blanket prong length in mm); repeatable")
     p.add_argument("--svg-dpi", type=float, metavar="DPI",
                    help="the SVG's own px per inch, e.g. 72 for Illustrator exports (default 96)")
     p.add_argument("--speed", type=int, default=650,
@@ -125,9 +159,11 @@ def main(argv: list[str] | None = None) -> int:
         choices = Choices(
             overrides=_pairs(a.set, "--set"), color_map=_pairs(a.map, "--map"),
             skip=a.skip or [], fills=_fills(a.fill), no_outline=a.no_outline or [],
-            satins=_satins(a.satin),
-            fill_spec=FillSpec(angle=a.fill_angle, spacing=a.fill_spacing, stitch_len=a.fill_stitch,
-                               underlay=not a.no_underlay, pull_comp=a.pull_comp))
+            satins={**_satins(a.satin), **_outlines(a.outline)},
+            fill_spec=FillSpec(angle=_fill_angle(a), spacing=a.fill_spacing,
+                               stitch_len=a.fill_stitch, underlay=not a.no_underlay,
+                               pull_comp=a.pull_comp, pattern=a.fill_pattern,
+                               pattern_size=a.pattern_size))
         rep = convert(
             a.svg, a.out, choices,
             width_mm=a.width, fit=a.fit, hoop_mm=a.hoop, margin_mm=a.margin,

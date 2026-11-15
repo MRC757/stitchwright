@@ -11,7 +11,7 @@ from tkinter import font as tkfont
 
 from PIL import Image, ImageTk
 
-from .fill import FillSpec, SatinSpec
+from .fill import FILL_PATTERNS, OUTLINE_STYLES, STYLE_DEFAULTS, FillSpec, SatinSpec
 from .fontpreview import is_symbol_font, sample_image
 from .geometry import bounds
 from .image_import import TraceSettings
@@ -541,9 +541,15 @@ class FillDialog(tk.Toplevel):
         self.v_len = tk.StringVar(value=f"{base.stitch_len:g}")
         self.v_underlay = tk.BooleanVar(value=base.underlay)
         self.v_pull = tk.StringVar(value=f"{base.pull_comp:g}")
+        self.v_pattern = tk.StringVar(value=FILL_PATTERNS.get(base.pattern, FILL_PATTERNS["rows"]))
+        self.v_psize = tk.StringVar(value=f"{base.pattern_size:g}")
         self.v_outline = tk.BooleanVar(value=outline)
-        self.v_style = tk.StringVar(value="satin" if satin else "run")
-        self.v_width = tk.StringVar(value=f"{(satin or SatinSpec()).width:g}")
+        style = satin.style if satin else "run"
+        self.v_style = tk.StringVar(value=style)
+        w, sp, _ = STYLE_DEFAULTS.get(style, STYLE_DEFAULTS["satin"])
+        self.v_width = tk.StringVar(value=f"{satin.width if satin else w:g}")
+        self.v_ospacing = tk.StringVar(value=f"{satin.spacing if satin else sp:g}")
+        self._style_was = style
         self._img = None
         grey = dict(foreground="#666666")
 
@@ -575,19 +581,30 @@ class FillDialog(tk.Toplevel):
         b = ttk.Button(of, text="Choose…", command=self._pick)
         b.pack(side="left", padx=6)
         self.widgets += [r1, r2, b]
+        ttk.Label(ff, text="Pattern").grid(row=2, column=0, sticky="w", pady=2)
+        cb = ttk.Combobox(ff, textvariable=self.v_pattern, values=list(FILL_PATTERNS.values()),
+                          state="readonly", width=28)
+        cb.grid(row=2, column=1, columnspan=2, sticky="w", pady=2)
+        cb.bind("<<ComboboxSelected>>", lambda e: self._pattern_chosen())
+        self.cb_pattern = cb
+        self.widgets.append(cb)
         rows = (("Angle (°)", self.v_angle, "direction of the rows; turns with the object"),
                 ("Row spacing (mm)", self.v_spacing, "0.2 covers solidly; larger is lighter"),
                 ("Stitch length (mm)", self.v_len, "3–4 mm"),
-                ("Pull compensation (mm)", self.v_pull, "0.2 typical; more for stretchy fabric"))
-        for i, (label, var, hint) in enumerate(rows, start=2):
+                ("Pull compensation (mm)", self.v_pull, "0.2 typical; more for stretchy fabric"),
+                ("Pattern size (mm)", self.v_psize, "diamonds and waves: 3–10 mm"))
+        self.e_psize = None
+        for i, (label, var, hint) in enumerate(rows, start=3):
             ttk.Label(ff, text=label).grid(row=i, column=0, sticky="w", pady=2)
             e = ttk.Entry(ff, textvariable=var, width=7)
             e.grid(row=i, column=1, sticky="w", pady=2)
             ttk.Label(ff, text=hint, **grey).grid(row=i, column=2, sticky="w", padx=6)
             self.widgets.append(e)
+            if var is self.v_psize:
+                self.e_psize = e
         u = ttk.Checkbutton(ff, text="Underlay (light stitches first, so the fill lies flat)",
                             variable=self.v_underlay)
-        u.grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        u.grid(row=8, column=0, columnspan=3, sticky="w", pady=(4, 0))
         self.widgets.append(u)
 
         # Outline ---------------------------------------------------------
@@ -599,14 +616,24 @@ class FillDialog(tk.Toplevel):
         self.o_widgets = []
         sf = ttk.Frame(fo)
         sf.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        for val, text in (("run", "Run stitch (a thin line)"), ("satin", "Satin column, width")):
-            rb = ttk.Radiobutton(sf, text=text, value=val, variable=self.v_style)
-            rb.pack(side="left", padx=(0, 6))
+        styles = [("run", "Run stitch (a thin line)")] + list(OUTLINE_STYLES.items())
+        for n, (val, text) in enumerate(styles):
+            rb = ttk.Radiobutton(sf, text=text, value=val, variable=self.v_style,
+                                 command=self._style_chosen)
+            rb.grid(row=n // 2, column=n % 2, sticky="w", padx=(0, 12), pady=1)
             self.o_widgets.append(rb)
-        e = ttk.Entry(sf, textvariable=self.v_width, width=5)
-        e.pack(side="left")
-        ttk.Label(sf, text=" mm  (1–5 mm suits borders)", **grey).pack(side="left")
-        self.o_widgets.append(e)
+        nf = ttk.Frame(fo)
+        nf.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        self.l_owidth = ttk.Label(nf, text="Width (mm)")
+        self.l_owidth.grid(row=0, column=0, sticky="w")
+        self.e_owidth = ttk.Entry(nf, textvariable=self.v_width, width=5)
+        self.e_owidth.grid(row=0, column=1, sticky="w", padx=(6, 16))
+        self.l_ospacing = ttk.Label(nf, text="Spacing (mm)")
+        self.l_ospacing.grid(row=0, column=2, sticky="w")
+        self.e_ospacing = ttk.Entry(nf, textvariable=self.v_ospacing, width=5)
+        self.e_ospacing.grid(row=0, column=3, sticky="w", padx=6)
+        self.l_ohint = ttk.Label(fo, text="", **grey)
+        self.l_ohint.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
         self.info = ttk.Label(f, text="", foreground=ERROR_COLOUR)
         self.info.pack(anchor="w", pady=(6, 0))
@@ -635,13 +662,53 @@ class FillDialog(tk.Toplevel):
             self.v_same.set(False)
             self._show_thread()
 
+    STYLE_HINTS = {
+        "run": "",
+        "bean": "Spacing is the stitch length; each stitch is sewn three times.",
+        "satin": "Width 1–5 mm suits borders; spacing 0.3–0.5 mm covers solidly.",
+        "zigzag": "An open zigzag: spacing 1–3 mm between points.",
+        "blanket": "Width is the prong length; spacing is the gap between prongs. "
+                   "Prongs point inwards.",
+    }
+
+    def _pattern(self) -> str:
+        names = {v: k for k, v in FILL_PATTERNS.items()}
+        return names.get(self.v_pattern.get(), "rows")
+
+    def _pattern_chosen(self):
+        # the textured patterns are drawn across the rows: upright with rows at 0 degrees
+        if self._pattern() in ("diamond", "wave") and self.v_angle.get().strip() == "45":
+            self.v_angle.set("0")
+        self._enable()
+
+    def _style_chosen(self):
+        style = self.v_style.get()
+        if style != self._style_was and style in STYLE_DEFAULTS:
+            w, sp, _ = STYLE_DEFAULTS[style]
+            self.v_width.set(f"{w:g}")
+            self.v_ospacing.set(f"{sp:g}")
+        self._style_was = style
+        self._enable()
+
     def _enable(self):
         state = "normal" if self.v_on.get() else "disabled"
         for w in self.widgets:
             w.configure(state=state)
-        ostate = "normal" if self.v_outline.get() else "disabled"
+        if state == "normal":
+            self.cb_pattern.configure(state="readonly")
+            if self._pattern() not in ("diamond", "wave"):
+                self.e_psize.configure(state="disabled")
+        on = self.v_outline.get()
         for w in self.o_widgets:
-            w.configure(state=ostate)
+            w.configure(state="normal" if on else "disabled")
+        style = self.v_style.get()
+        width_on = on and style in ("satin", "zigzag", "blanket")
+        spacing_on = on and style != "run"
+        for w in (self.l_owidth, self.e_owidth):
+            w.configure(state="normal" if width_on else "disabled")
+        for w in (self.l_ospacing, self.e_ospacing):
+            w.configure(state="normal" if spacing_on else "disabled")
+        self.l_ohint.configure(text=self.STYLE_HINTS.get(style, "") if on else "")
 
     def _num(self, var, label, lo, hi):
         try:
@@ -656,15 +723,26 @@ class FillDialog(tk.Toplevel):
         try:
             fill = None
             if self.v_on.get():
+                pattern = self._pattern()
                 fill = FillSpec(None if self.v_same.get() else self.other_rgb,
                                 self._num(self.v_angle, "Angle", -360, 360),
                                 self._num(self.v_spacing, "Row spacing", 0.2, 3),
                                 self._num(self.v_len, "Stitch length", 1, 12),
                                 self.v_underlay.get(),
-                                self._num(self.v_pull, "Pull compensation", 0, 1))
+                                self._num(self.v_pull, "Pull compensation", 0, 1),
+                                pattern,
+                                self._num(self.v_psize, "Pattern size", 2, 20)
+                                if pattern in ("diamond", "wave") else FillSpec().pattern_size)
             satin = None
-            if self.v_outline.get() and self.v_style.get() == "satin":
-                satin = SatinSpec(width=self._num(self.v_width, "Satin width", 0.5, 8))
+            style = self.v_style.get()
+            if self.v_outline.get() and style in STYLE_DEFAULTS:
+                name = OUTLINE_STYLES[style].split(" (")[0]
+                w, sp, under = STYLE_DEFAULTS[style]
+                if style in ("satin", "zigzag", "blanket"):
+                    w = self._num(self.v_width, f"{name} width", 0.5, 8)
+                lo = 0.2 if style == "satin" else 0.5
+                sp = self._num(self.v_ospacing, f"{name} spacing", lo, 6)
+                satin = SatinSpec(width=w, spacing=sp, underlay=under, style=style)
         except ValueError as e:
             self.info.configure(text=str(e))
             return

@@ -4,8 +4,9 @@ Turn artwork into Brother **.PES** embroidery files, with a desktop window for a
 design, choosing threads, filling shapes, lettering and previewing the stitches.
 
 Built for the **Brother PE540D** (100 × 100 mm / 4" × 4" hoop). It reads SVG artwork,
-pictures (PNG/JPEG) and existing embroidery files. It sews run-stitch outlines, satin columns
-and filled areas (tatami fill with underlay). Designs can also be exported for other makes of
+pictures (PNG/JPEG) and existing embroidery files. It sews outlines (run, bean, satin, zigzag
+or blanket stitch) and filled areas (rows, contour, diamond, wave or criss-cross fill, with
+underlay). Designs can also be exported for other makes of
 machine: DST (Tajima, read by most machines), EXP (Melco, Bernina), JEF (Janome), VP3
 (Pfaff, Husqvarna Viking) and XXX (Singer).
 
@@ -36,6 +37,13 @@ Stitchwright was called *svg2pes* before version 0.2.1.
   three stitches along the line (1.0 mm out, 0.6 mm back, 1.0 mm on) so that no two needle
   drops share a hole.
 - Satin columns for borders, of any width from 0.5 to 8 mm, with a centre-walk underlay.
+- More outline styles: **bean** (each stitch sewn three times, a bold line), **zigzag** (an
+  open zigzag) and **blanket** (an E-stitch with prongs pointing into the shape, for appliqué
+  edges).
+- Fill patterns: **rows** (tatami, the default), **contour** (rings that follow the outline,
+  spiralling inwards; good for round shapes and curls), **diamonds** and **waves** (rows
+  whose needle drops line up into the pattern, so it shows in the fill's texture) and
+  **criss-cross** (two layers of rows at right angles).
 - Fill (tatami) for closed shapes:
   - you choose the angle, density and stitch length
   - underlay and pull compensation help it lie flat
@@ -135,8 +143,14 @@ will be sewn in.
   selected objects:
   - **Fill:** on or off; the thread (the outline's, or another); the row angle (it turns
     with the object); row spacing (0.2 mm by default, which covers the fabric solidly;
-    larger is lighter); stitch length; pull compensation; and underlay.
-  - **Outline:** on or off; run stitch or a satin column of a set width.
+    larger is lighter); stitch length; pull compensation; underlay; and the **pattern**:
+    rows, contour, diamonds, waves or criss-cross. Diamonds and waves have a pattern size
+    and are drawn across the rows, so choosing one sets the angle to 0° (upright diamonds)
+    if it was 45°.
+  - **Outline:** on or off; run stitch, bean (triple run), satin column, zigzag or blanket.
+    Width is the column width (satin, zigzag) or the prong length (blanket); spacing is the
+    distance between needle points (satin, zigzag), between prongs (blanket) or the stitch
+    length (bean). Choosing a style fills in its usual settings.
   - Only closed shapes can be filled.
 - **Sew / skip** (Space) leaves objects out without deleting them.
 
@@ -220,7 +234,10 @@ The preview is drawn from the stitches that will be saved, not from the artwork.
 | `--fill OBJECT[=COLOUR]` | fill a closed shape, in COLOUR or else its own thread |
 | `--no-outline OBJECT` | don't sew the outline (for a fill without a border) |
 | `--satin OBJECT[=WIDTH]` | sew the outline as a satin column, WIDTH mm (default 2) |
-| `--fill-angle DEG` | direction of the fill rows (default 45) |
+| `--outline OBJECT=STYLE[:WIDTH]` | sew the outline as `bean`, `satin`, `zigzag` or `blanket` (WIDTH: column width or prong length) |
+| `--fill-pattern NAME` | `rows` (default), `contour`, `diamond`, `wave` or `crosshatch` |
+| `--pattern-size MM` | size of the diamonds or waves (default 5) |
+| `--fill-angle DEG` | direction of the fill rows (default 45; 0 for diamond and wave) |
 | `--fill-spacing MM` | distance between fill rows; smaller is denser (default 0.2) |
 | `--fill-stitch MM` | fill stitch length (default 3.5) |
 | `--pull-comp MM` | added to each end of a fill row (default 0.2) |
@@ -272,8 +289,12 @@ Sew a test piece before using them on a real project.
 - **Satin** works best at 1.5 mm or wider on gentle curves. On very tight curves (smaller than
   the column is wide) it fans out. For small script lettering, use a single-line font with run
   stitch.
-- **Fills** are tatami only: there is no contour or radial fill. Very thin areas fill
-  poorly; give them a satin outline instead.
+- **Fills:** very thin areas fill poorly; give them a satin outline instead. A **contour
+  fill** suits round shapes, curls and thick strokes. On script with hairline strokes (such as
+  Edwardian Script) its rings break up into many separate pieces, so it needs several times as
+  many jumps as rows; use rows there. There is no radial fill.
+- **Textured fills** (diamonds, waves) show their pattern only in the texture of the needle
+  holes, so it is subtle; it shows more at wider row spacing.
 - **Overlapping fills:** the area under an upper fill is cut out of the fill below it (less a
   0.4 mm overlap), but shapes that are only outlined don't cut anything out.
 - **Imported stitches** (from PES, DST and other embroidery files) are sewn point for point.
@@ -326,7 +347,10 @@ Finished items are ticked.
       order with the fewest colour changes.
 - [x] **Fill angle follows rotation.**
 - [ ] **Satin lettering:** satin columns that follow the shape of outline-font letters.
-- [ ] **Edge-run underlay** and **contour fills** that follow a shape's outline.
+- [x] **Contour fills** that follow a shape's outline, and **diamond, wave and criss-cross**
+  textured fills.
+- [x] **Bean, zigzag and blanket** outlines.
+- [ ] **Edge-run underlay.**
 - [ ] **Travel stitches between objects** of the same colour, not only within a fill.
 
 ### Designing and editing
@@ -375,7 +399,8 @@ Finished items are ticked.
 | `stitchwright/image_import.py` | traces pictures into thread-colour shapes |
 | `stitchwright/pes_import.py` | reads existing embroidery files as objects of exact stitches |
 | `stitchwright/palette.py` | the 61 Brother threads and colour parsing |
-| `stitchwright/fill.py` | fill (tatami, underlay, pull compensation, cut-outs, travel) and satin |
+| `stitchwright/fill.py` | fill (rows, diamond, wave and criss-cross patterns, underlay, pull compensation, cut-outs, travel) and outline styles (satin, bean, zigzag, blanket) |
+| `stitchwright/contour.py` | contour fill: rings that follow a shape's outline |
 | `stitchwright/stitching.py` | run stitches, tie stitches, colour blocks and sewing order |
 | `stitchwright/convert.py` | sizing, colour choices, stitch planning, time estimate, writing PES and other machines' files |
 | `stitchwright/text.py` | text with installed and single-line fonts, arcs, monograms |

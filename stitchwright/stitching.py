@@ -1,6 +1,7 @@
 """Turn design objects into ordered stitch paths.
 
-Outlines are sewn as run stitches or satin columns. Objects with a fill also
+Outlines are sewn as run stitches, or (with a SatinSpec) as satin, bean, zigzag or
+blanket stitch. Objects with a fill also
 get fill rows (see fill.py), sewn before the outlines so the outlines sit on
 top and cover the edges of the fill. Imported stitches (from a PES file) are
 sewn exactly as they are.
@@ -12,7 +13,7 @@ import math
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 
-from .fill import closed_rings, fill_paths, satin_path
+from .fill import closed_rings, fill_paths, outline_path
 from .geometry import resample, simplify
 from .svg_import import DesignObject, Point
 
@@ -40,7 +41,8 @@ class Run:
     points: list[Point]
     closed: bool
     object_id: str
-    kind: str = "run"       # run | fill | satin | stitches (all but run are final needle points)
+    kind: str = "run"       # run | fill | stitches | an outline style (satin, bean, ...);
+                            # all but run are final needle points
 
     @property
     def fill(self) -> bool:
@@ -112,9 +114,9 @@ def _fill_runs(obj: DesignObject, s: Settings, cutouts=None) -> list[Run]:
 def _satin_runs(obj: DesignObject, s: Settings) -> list[Run]:
     runs = []
     for pl in obj.polylines:
-        pts = satin_path(pl.points, pl.closed, obj.satin, s.min_stitch)
+        pts = outline_path(pl.points, pl.closed, obj.satin, s.min_stitch, s.corner_deg)
         if len(pts) >= 2:
-            runs.append(Run(pts, False, obj.obj_id, kind="satin"))
+            runs.append(Run(pts, False, obj.obj_id, kind=obj.satin.style))
     return runs
 
 

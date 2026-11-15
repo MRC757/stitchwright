@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import pyembroidery
 from pyembroidery import EmbPattern, EmbThread
 
-from .fill import FillSpec, SatinSpec, can_fill
+from .fill import FILL_PATTERNS, FillSpec, SatinSpec, can_fill
 from .palette import Thread, nearest_brother, parse_color, thread_for_rgb, to_hex
 from .preview import render_preview
 from .stitching import ColorBlock, Settings, plan_blocks, stitch_points
@@ -86,7 +86,8 @@ class Choices:
     skip: list[str] = field(default_factory=list)                # objects left out
     fills: dict[str, str | None] = field(default_factory=dict)   # object -> fill colour (None: own)
     no_outline: list[str] = field(default_factory=list)          # objects sewn without outline
-    satins: dict[str, float] = field(default_factory=dict)       # object -> satin width (mm)
+    satins: dict = field(default_factory=dict)   # object -> satin width (mm), or a SatinSpec
+                                                 # for any outline style (bean, zigzag, ...)
     fill_spec: FillSpec = field(default_factory=FillSpec)        # angle, density, ... for fills
 
 
@@ -152,7 +153,7 @@ def apply_color_choices(design: Design, choices: Choices) -> None:
     for key in no_outline or []:
         find(key).outline = False
     for key, width in (satins or {}).items():
-        find(key).satin = SatinSpec(width=width)
+        find(key).satin = width if isinstance(width, SatinSpec) else SatinSpec(width=width)
 
 
 def snap_colors(design: Design, snap: bool = True) -> dict[str, RGB]:
@@ -288,7 +289,11 @@ def plan_design(design: Design, choices: Choices | None = None, *,
     warnings = list(design.warnings)
     for o in design.active():
         if o.satin is not None and not 0.5 <= o.satin.width <= 8:
-            raise ConversionError(f"Satin width must be 0.5-8 mm ({o.obj_id})")
+            raise ConversionError(f"{o.satin.style.capitalize()} width must be 0.5-8 mm "
+                                  f"({o.obj_id})")
+        if o.satin is not None and not 0.2 <= o.satin.spacing <= 6:
+            raise ConversionError(f"{o.satin.style.capitalize()} spacing must be 0.2-6 mm "
+                                  f"({o.obj_id})")
         if o.fill is not None:
             if not 0.2 <= o.fill.spacing <= 3:
                 raise ConversionError(f"Fill row spacing must be 0.2-3 mm ({o.obj_id})")
@@ -296,6 +301,10 @@ def plan_design(design: Design, choices: Choices | None = None, *,
                 raise ConversionError(f"Fill stitch length must be 1-{MAX_STITCH_LEN:g} mm ({o.obj_id})")
             if not 0 <= o.fill.pull_comp <= 1:
                 raise ConversionError(f"Pull compensation must be 0-1 mm ({o.obj_id})")
+            if o.fill.pattern not in FILL_PATTERNS:
+                raise ConversionError(f"Unknown fill pattern {o.fill.pattern!r} ({o.obj_id})")
+            if not 2 <= o.fill.pattern_size <= 20:
+                raise ConversionError(f"Pattern size must be 2-20 mm ({o.obj_id})")
     chosen = snap_colors(design, snap)
     if not snap:
         warnings.append("Colours not snapped: the machine will show the nearest Brother "

@@ -17,8 +17,20 @@ Quality features:
 - travel: separate pieces of one fill are joined by stitches running along
   the shape's edge (later covered by the outline) instead of by jumps.
 
-Satin: a zig-zag column of a set width following a line, with a centre-walk
-underlay, for smooth borders.
+Fill patterns (FillSpec.pattern):
+- rows: plain rows (above);
+- contour: rings that follow the outline, inwards (see contour.py);
+- diamond, wave: rows whose needle drops line up along diamond or wavy lines, so
+  the pattern shows in the fill's texture;
+- crosshatch: two layers of rows at right angles, each half as dense.
+
+Outlines other than a plain run stitch (SatinSpec.style):
+- satin: a zig-zag column of a set width following a line, with a centre-walk
+  underlay, for smooth borders;
+- bean: a run stitch sewn three times over (forward, back, forward), a bold line;
+- zigzag: an open zigzag of a set width;
+- blanket: a run stitch with short prongs at right angles (an E-stitch), inwards on
+  closed shapes, for appliqué edges.
 """
 from __future__ import annotations
 
@@ -28,7 +40,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .geometry import drop_close, point_in_polygon, resample, subdivide, winding_number
+from .geometry import (drop_close, point_in_polygon, resample, signed_area, subdivide,
+                       winding_number)
 
 Point = tuple[float, float]
 RGB = tuple[int, int, int]
@@ -38,6 +51,7 @@ MAX_TRAVEL_MM = 150.0  # longer trips along the edge are left as jumps (each jum
                        # to cut by hand on a machine without a cutter, like the PE540D)
 NONZERO, EVENODD = "nonzero", "evenodd"    # fill rules, as SVG names them
 KNOCKOUT_OVERLAP_MM = 0.4   # a cut-out fill still reaches this far under the shape on top
+PATTERN_CLEAR = 0.2     # pattern fills: no ordinary drop within this many stitches of a pattern line
 
 
 @dataclass(frozen=True)
@@ -48,14 +62,38 @@ class FillSpec:
     stitch_len: float = 3.5     # mm, longest stitch along a row
     underlay: bool = True       # sparse rows at right angles first
     pull_comp: float = 0.2      # mm added to each end of a row at the shape's edge
+    pattern: str = "rows"       # rows | contour | diamond | wave | crosshatch (FILL_PATTERNS)
+    pattern_size: float = 5.0   # mm, size of the diamonds or waves
+
+
+# names shown to the user, in menu order
+FILL_PATTERNS = {"rows": "Rows", "contour": "Contour (follows the outline)",
+                 "diamond": "Diamonds", "wave": "Waves", "crosshatch": "Criss-cross"}
 
 
 @dataclass(frozen=True)
 class SatinSpec:
-    width: float = 2.0          # mm, column width
-    spacing: float = 0.4        # mm between needle points along the column
-    underlay: bool = True       # centre walk first
-    pull_comp: float = 0.2      # mm added to the width
+    """An outline sewn as something other than a plain run stitch (see style)."""
+    width: float = 2.0          # mm, column width (satin, zigzag) or prong length (blanket)
+    spacing: float = 0.4        # mm between needle points along the line (bean: stitch length)
+    underlay: bool = True       # centre walk first (satin, zigzag)
+    pull_comp: float = 0.2      # mm added to the width (satin, zigzag)
+    style: str = "satin"        # satin | bean | zigzag | blanket (OUTLINE_STYLES)
+
+
+# names shown to the user, and each style's usual (width, spacing, underlay)
+OUTLINE_STYLES = {"bean": "Bean (triple run, bold)", "satin": "Satin column",
+                  "zigzag": "Zigzag", "blanket": "Blanket (appliqué edge)"}
+STYLE_DEFAULTS = {"satin": (2.0, 0.4, True), "bean": (2.0, 2.5, False),
+                  "zigzag": (2.0, 1.5, False), "blanket": (2.5, 2.5, False)}
+
+
+def outline_spec(style: str, width: float | None = None, spacing: float | None = None
+                 ) -> SatinSpec:
+    """A SatinSpec for the style, with that style's usual settings filled in."""
+    w, sp, under = STYLE_DEFAULTS[style]
+    return SatinSpec(width=w if width is None else width,
+                     spacing=sp if spacing is None else spacing, underlay=under, style=style)
 
 
 def closed_rings(polylines) -> list[list[Point]]:
@@ -78,13 +116,23 @@ def can_fill(polylines) -> bool:
 
 # --------------------------------------------------------------------- rows
 def _row_points(xa: float, xb: float, y: float, grid_off: float, L: float,
-                min_len: float) -> list[Point]:
-    """Needle points from xa to xb (either direction) along row y."""
+                min_len: float, forced=None) -> list[Point]:
+    """Needle points from xa to xb (either direction) along row y. forced: positions
+    that must get a needle drop (a pattern fill's lines); the usual drops near them
+    are left out, so the pattern's drops stand out in lines."""
     lo, hi = min(xa, xb), max(xa, xb)
     n0 = math.ceil((lo - grid_off) / L)
     n1 = math.floor((hi - grid_off) / L)
     inner = [grid_off + n * L for n in range(n0, n1 + 1)]
     inner = [x for x in inner if x - lo >= min_len and hi - x >= min_len]
+    if forced:
+        must = []
+        for x in sorted(forced):
+            if x - lo >= min_len and hi - x >= min_len and (not must or x - must[-1] >= min_len):
+                must.append(x)
+        clear = max(min_len, PATTERN_CLEAR * L)
+        inner = sorted(must + [x for x in inner
+                               if all(abs(x - m) >= clear for m in must)])
     if xa > xb:
         inner.reverse()
     return [(xa, y)] + [(x, y) for x in inner] + [(xb, y)]
@@ -167,8 +215,10 @@ def _rows(rings, cutouts, angle, spacing, inset=0.0, extend=0.0, rule=NONZERO):
     return rows, (co, si)
 
 
-def _serpentine(rows, L: float, min_len: float, stagger: bool = True) -> list[list[Point]]:
-    """Join row segments into back-and-forth paths (in the rows' frame)."""
+def _serpentine(rows, L: float, min_len: float, stagger: bool = True,
+                drops=None) -> list[list[Point]]:
+    """Join row segments into back-and-forth paths (in the rows' frame). drops(y, lo,
+    hi): positions on row y between lo and hi that must get a needle drop."""
     used = [[False] * len(segs) for _, segs in rows]
     paths: list[list[Point]] = []
     for r0, (_, segs0) in enumerate(rows):
@@ -183,7 +233,8 @@ def _serpentine(rows, L: float, min_len: float, stagger: bool = True) -> list[li
                 x0, x1 = segs[j]
                 start, end = (x0, x1) if rightward else (x1, x0)
                 off = (r % 3) * L / 3 if stagger else 0.0
-                row = _row_points(start, end, y, off, L, min_len)
+                forced = drops(y, min(start, end), max(start, end)) if drops else None
+                row = _row_points(start, end, y, off, L, min_len, forced)
                 if path:
                     path.extend(subdivide(path[-1], row[0], L))   # step down to this row
                     path.extend(row[1:])
@@ -345,7 +396,8 @@ def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0,
                 cur.extend(pts[1:])
             here = pts[-1]
             here_e = ends[i][0] if back else ends[i][1]
-    return out
+    # two pieces whose ends almost touch are joined by a stitch shorter than min_len
+    return [drop_close(p, min_len) for p in out]
 
 
 # --------------------------------------------------------------------- public
@@ -370,12 +422,52 @@ def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
         rows, cs = _rows(rings, cutouts, spec.angle + 90, max(2.0, spec.spacing * 5), inset=0.6,
                          rule=rule)
         paths += _unrotate(_serpentine(rows, min(3.0, spec.stitch_len), min_len, stagger=False), cs)
-    under = len(paths)
-    rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp, rule=rule)
-    paths += _unrotate(_serpentine(rows, spec.stitch_len, min_len), cs)
+    groups = [0] * len(paths)
+    if spec.pattern == "contour":
+        from .contour import contour_paths
+        top = contour_paths(rings, cutouts, spec.spacing, spec.stitch_len, rule, min_len,
+                            first=max(0.05, spec.spacing / 2 - spec.pull_comp))
+        paths += top
+        groups += [1] * len(top)
+    elif spec.pattern == "crosshatch":                  # two layers, each half as dense
+        for layer, angle in enumerate((spec.angle + 90, spec.angle), start=1):
+            rows, cs = _rows(rings, cutouts, angle, spec.spacing * 2, extend=spec.pull_comp,
+                             rule=rule)
+            top = _unrotate(_serpentine(rows, spec.stitch_len, min_len), cs)
+            paths += top
+            groups += [layer] * len(top)
+    else:
+        rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp, rule=rule)
+        top = _unrotate(_serpentine(rows, spec.stitch_len, min_len, drops=_pattern_drops(spec)),
+                        cs)
+        paths += top
+        groups += [1] * len(top)
     travel = rings if hidden else [inset_ring(r, rings, TRAVEL_INSET_MM, rule) for r in rings]
-    groups = [0] * under + [1] * (len(paths) - under)
     return travel_join(paths, travel, L=2.5, min_len=min_len, groups=groups)
+
+
+def _pattern_drops(spec: FillSpec):
+    """For diamond and wave fills, drops(y, lo, hi): where row y (in the rows' frame,
+    x along the row) crosses the pattern's lines. The lines are drawn in the rows'
+    frame, so the pattern turns with the row angle (0 degrees: upright diamonds)."""
+    D = max(1.0, spec.pattern_size)
+    if spec.pattern == "diamond":
+        slope = 0.6                                       # lines about 60 degrees to the rows
+        shifts = (lambda y: slope * y, lambda y: -slope * y)
+    elif spec.pattern == "wave":
+        amp, length = 0.3 * D, 2.0 * D
+        shifts = (lambda y: amp * math.sin(2 * math.pi * y / length),)
+    else:
+        return None
+
+    def drops(y, lo, hi):
+        out = []
+        for shift in shifts:                              # lines x = k*D - shift(y)
+            off = shift(y)
+            out += [k * D - off for k in range(math.ceil((lo + off) / D),
+                                               math.floor((hi + off) / D) + 1)]
+        return out
+    return drops
 
 
 def _inside_fill(p, rings, rule: str = NONZERO) -> bool:
@@ -480,6 +572,60 @@ def _zigzag(pts, half: float, spacing: float) -> list[Point]:
         tx, ty = line.tangent(s, h)
         side = half if i % 2 == 0 else -half
         out.append((x - ty * side, y + tx * side))
+    return out
+
+
+def outline_path(points, closed: bool, spec: SatinSpec, min_len: float = 0.4,
+                 corner_deg: float = 35.0) -> list[Point]:
+    """Needle points for an outline in spec.style (satin, bean, zigzag or blanket)."""
+    if spec.style == "bean":
+        return bean_path(points, closed, spec.spacing, min_len, corner_deg)
+    if spec.style == "blanket":
+        return blanket_path(points, closed, spec.width, spec.spacing, min_len, corner_deg)
+    return satin_path(points, closed, spec, min_len)
+
+
+def _closed_line(points, closed: bool):
+    pts = list(points)
+    if closed and pts and pts[0] != pts[-1]:
+        pts.append(pts[0])
+    return pts
+
+
+def bean_path(points, closed: bool, stitch_len: float, min_len: float = 0.4,
+              corner_deg: float = 35.0) -> list[Point]:
+    """A run stitch with every stitch sewn three times: forward, back, forward."""
+    pts = _closed_line(points, closed)
+    if len(pts) < 2:
+        return []
+    run = resample(pts, max(1.0, stitch_len), corner_deg, min_len)
+    out = [run[0]]
+    for a, b in zip(run, run[1:]):
+        out += [b, a, b]
+    return out
+
+
+def blanket_path(points, closed: bool, prong: float, pitch: float, min_len: float = 0.4,
+                 corner_deg: float = 35.0) -> list[Point]:
+    """A run stitch with a prong at right angles every `pitch` mm: out `prong` mm and
+    back into the same hole. Prongs point inwards on a closed shape (where an appliqué
+    piece's edge is) and to the left on an open line. The first and last stitches are
+    plain, so the ties have a straight stitch to lock on."""
+    pts = _closed_line(points, closed)
+    if len(pts) < 2:
+        return []
+    if closed and len(pts) > 3 and signed_area(pts) > 0:
+        pts = pts[::-1]                     # run anticlockwise on screen: the prongs then point in
+    base = resample(pts, max(min_len, pitch), corner_deg, min_len)
+    if len(base) < 3:
+        return base
+    line = _Line(base)
+    out = [base[0]]
+    for i in range(1, len(base) - 1):
+        p = base[i]
+        tx, ty = line.tangent(line.cum[i], min(1.0, pitch / 2))
+        out += [p, (p[0] + ty * prong, p[1] - tx * prong), p]
+    out.append(base[-1])
     return out
 
 
