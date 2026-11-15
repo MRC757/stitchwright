@@ -157,4 +157,15 @@ and checks that `apt remove` removes it completely.
 **Not yet seen on a real Ubuntu desktop:** maximising, the mouse wheel, `.PES` files in the
 dialogs, scaling, the dock icon, double-clicking a `.pes`. That's step F.
 
-Next: step E (release workflow publishes the `.deb` alongside the `.exe`).
+**Step E done (2026-11-15).** `build-exe` now runs on every push. The new `release` job
+waits for `build-exe`, `build-deb` and `deb-on-24-04`, collects `stitchwright.exe` and the
+`.deb`, and writes the notes with `packaging/release_notes.py` (install steps for Windows and
+Ubuntu, plus that version's CHANGELOG section). For a `v*` tag it checks the tag matches
+`__version__` and publishes one GitHub Release with both files; on other pushes it is a dry
+run (checked: both files found, notes correct, nothing published).
+
+To release: give the CHANGELOG section a heading `## <version> (<date>)`, bump
+`stitchwright/__init__.py` and `version_info.txt`, merge to `main`, then tag `v<version>` and
+push the tag.
+
+Next: step F (real Ubuntu desktop check) and step G (README, CHANGELOG, release 0.3.0).
