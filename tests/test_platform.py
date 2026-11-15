@@ -39,13 +39,21 @@ def test_linux_look_uses_the_clam_theme_and_the_asked_for_scale(tk_root, monkeyp
     from tkinter import ttk
     from stitchwright.gui import setup_linux_look
     root = tk_root
+    from tkinter import font as tkfont
+    from stitchwright.gui import LINUX_UI_FONTS, TK_NAMED_FONTS
     style = ttk.Style(root)
     theme, scaling = style.theme_use(), root.tk.call("tk", "scaling")
+    families = {n: tkfont.nametofont(n, root=root).cget("family") for n in TK_NAMED_FONTS}
     monkeypatch.setenv("STITCHWRIGHT_SCALE", "2")
     try:
         setup_linux_look(root)
         assert style.theme_use() == "clam"
         assert abs(float(root.tk.call("tk", "scaling")) - 2 * 96 / 72) < 0.02   # Tk rounds it
+        installed = [f for f in LINUX_UI_FONTS if f in tkfont.families(root)]
+        family = tkfont.nametofont("TkDefaultFont", root=root).cget("family")
+        assert family == (installed[0] if installed else families["TkDefaultFont"])
     finally:
         style.theme_use(theme)
         root.tk.call("tk", "scaling", scaling)
+        for n, f in families.items():
+            tkfont.nametofont(n, root=root).configure(family=f)

@@ -19,6 +19,7 @@ import time
 import tkinter as tk
 from dataclasses import replace
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from PIL import Image, ImageTk
 
@@ -57,6 +58,17 @@ SIM_FRAME_MS = 33
 NEEDLE_COLOUR = "#d32f2f"
 MAX_ZOOM = 60.0
 TEXT_WIDGETS = ("Entry", "TEntry", "Text", "TCombobox", "TSpinbox", "Spinbox")
+# Sew-out buttons. Linux's usual fonts (DejaVu, Liberation) have no media symbols, so
+# there they are arrows to a bar and two bars, which they do have.
+if sys.platform == "win32":
+    SYM_START, SYM_END, SYM_PAUSE = "⏮", "⏭", "⏸"
+else:
+    SYM_START, SYM_END, SYM_PAUSE = "⇤", "⇥", "❚❚"
+# Linux: the window's font, the first one installed. Tk's own choice there is DejaVu Sans,
+# much wider than Windows' Segoe UI, which crowds the window; Ubuntu's own font is closer.
+LINUX_UI_FONTS = ("Ubuntu", "Noto Sans", "Liberation Sans", "Cantarell", "DejaVu Sans")
+TK_NAMED_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
+                  "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont")
 
 
 # ------------------------------------------------------------------ main window
@@ -389,16 +401,17 @@ class App:
 
         sim = ttk.Frame(right)
         sim.pack(fill="x", pady=(4, 0))
-        ttk.Button(sim, text="⏮", width=3, command=self.sim_start).pack(side="left")
+        ttk.Button(sim, text=SYM_START, width=3, command=self.sim_start).pack(side="left")
         self.b_play = ttk.Button(sim, text="▶ Sew", width=8, command=self.sim_toggle)
         self.b_play.pack(side="left", padx=3)
-        ttk.Button(sim, text="⏭", width=3, command=self.sim_end).pack(side="left")
+        ttk.Button(sim, text=SYM_END, width=3, command=self.sim_end).pack(side="left")
+        # packed before the slider, so if space is short the slider shrinks, not these
+        ttk.Checkbutton(sim, text="Stop at colour changes",
+                        variable=self.v_stop_change).pack(side="right", padx=(8, 0))
+        ttk.Combobox(sim, textvariable=self.v_speed, values=list(SIM_SPEEDS), state="readonly",
+                     width=9).pack(side="right")
         self.s_sim = ttk.Scale(sim, from_=0, to=1, variable=self.v_sim, command=self._on_slide)
         self.s_sim.pack(side="left", fill="x", expand=True, padx=8)
-        ttk.Combobox(sim, textvariable=self.v_speed, values=list(SIM_SPEEDS), state="readonly",
-                     width=9).pack(side="left")
-        ttk.Checkbutton(sim, text="Stop at colour changes",
-                        variable=self.v_stop_change).pack(side="left", padx=(8, 0))
         self.l_sim = ttk.Label(right, text="Sew-out: press ▶ Sew to watch the design being "
                                            "stitched in order.", foreground="#555555")
         self.l_sim.pack(fill="x", pady=(2, 0))
@@ -1758,7 +1771,7 @@ class App:
             self.sim_pos = 0
         self.sim_playing = True
         self._sim_acc = 0.0
-        self.b_play.configure(text="⏸ Pause")
+        self.b_play.configure(text=SYM_PAUSE + " Pause")
         self.draw_preview(fast=True)
         self._sim_job = self.root.after(SIM_FRAME_MS, self._sim_tick)
 
@@ -1874,13 +1887,22 @@ def ui_scale_override(env=os.environ) -> float | None:
 
 
 def setup_linux_look(root: tk.Tk) -> None:
-    """Linux (X11): the 'clam' theme (Tk's default X11 look is from the 1990s) and the
-    screen scale. Tk on Linux usually assumes 96 dpi even on high-resolution screens, so
-    STITCHWRIGHT_SCALE or GDK_SCALE can make everything bigger."""
+    """Linux (X11): the 'clam' theme (Tk's default X11 look is from the 1990s), the
+    desktop's own font (LINUX_UI_FONTS) and the screen scale. Tk on Linux usually assumes
+    96 dpi even on high-resolution screens, so STITCHWRIGHT_SCALE or GDK_SCALE can make
+    everything bigger."""
     try:
         style = ttk.Style(root)
         if "clam" in style.theme_names():
             style.theme_use("clam")
+        installed = set(tkfont.families(root))
+        family = next((f for f in LINUX_UI_FONTS if f in installed), None)
+        if family:
+            for name in TK_NAMED_FONTS:
+                try:
+                    tkfont.nametofont(name, root=root).configure(family=family)
+                except tk.TclError:          # a named font this Tk doesn't have
+                    pass
         scale = ui_scale_override()
         if scale:
             root.tk.call("tk", "scaling", scale * 96 / 72)    # Tk's unit: pixels per point
