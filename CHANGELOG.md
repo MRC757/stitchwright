@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-15)
+
+**Testers wanted for the Ubuntu version.** It is tested automatically (installed on Ubuntu
+22.04 and 24.04, started, a design opened, files converted, then removed), and its PES files
+are byte for byte the same as the Windows app's, which have been sewn. But it hasn't yet been
+used on a real Ubuntu desktop. Please report anything odd at
+[Issues](https://github.com/MRC757/stitchwright/issues): the window's size and look, the mouse
+wheel, the file dialogs, fonts, the dock icon, double-clicking a `.pes` file, saving to the
+USB stick. Include the log (*Help → Open log folder*).
 
 - **Ubuntu version.** Stitchwright now runs on Ubuntu 22.04 and later. Download
   `stitchwright_<version>_amd64.deb` from the release and double-click it, or install it with
