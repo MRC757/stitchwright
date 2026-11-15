@@ -42,7 +42,9 @@ Stitchwright was called *svg2pes* before version 0.2.1.
   - fill hidden under shapes stacked on top is cut out (the fill below still runs 0.4 mm
     under the shape on top, so no fabric shows between them)
   - separate pieces are joined by travel stitches instead of jumps (sewn like a run stitch
-    along the edge, under the outline)
+    along the edge, under the outline). After each piece the nearest piece that can be
+    reached along the edge is sewn next, so a winding shape such as script lettering needs
+    only a few jumps (each one a thread to snip by hand on the PE540D)
   - overlapping parts of one shape are filled as drawn (SVG's `nonzero` rule, which fonts use
     too); a shape marked `fill-rule="evenodd"` gets holes where its parts overlap. Holes
     such as the middle of an "o" stay empty either way.
@@ -259,7 +261,8 @@ colour stop.
 (`samples/sample.pes`) loads and is read by the PE540D; filled script lettering (a TrueType
 font, fill with underlay and run-stitch outline, the 0.2.3 tie and travel stitches) sews
 cleanly; and filled shapes with lettering, saved by 0.2.4 with the file starting at the
-design's top-left corner, are placed correctly and sew whole. The 0.2 mm fill spacing (new in
+design's top-left corner, are placed correctly and sew whole; and a winding filled monogram
+sewn with 0.2.6's fill order needs only a few jumps to snip. The 0.2 mm fill spacing (new in
 0.2.4), the 0.4 mm overlap under stacked shapes, satin, imported pictures and the DST, EXP,
 JEF, VP3 and XXX exports are tested in code and in the preview, but have not been sewn yet.
 Sew a test piece before using them on a real project.
@@ -287,8 +290,10 @@ Sew a test piece before using them on a real project.
   recoloured and skipped, but not refilled. Resizing them changes their stitch density.
 - **SVG features ignored:** gradients, opacity, clipping masks and pictures embedded inside an
   SVG.
-- **Thread cutting:** the PE540D has no automatic cutter, so it most likely ignores the trim
-  codes written for long jumps. Snip those threads by hand after sewing.
+- **Thread cutting:** the PE540D has no automatic cutter, so every jump leaves a thread to
+  snip by hand after sewing. Jumps remain between separate objects of one colour (see
+  *Travel stitches between objects* below) and between parts of a fill that don't touch,
+  such as two letters that don't overlap.
 - **Time estimate:** it assumes the machine averages 85% of the speed you set, plus a minute
   per thread change. Real times vary.
 

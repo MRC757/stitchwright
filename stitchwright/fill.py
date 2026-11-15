@@ -26,13 +26,16 @@ import bisect
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 from .geometry import drop_close, point_in_polygon, resample, subdivide, winding_number
 
 Point = tuple[float, float]
 RGB = tuple[int, int, int]
 
 CLOSE_GAP_MM = 0.5     # outlines whose ends are this close count as closed
-MAX_TRAVEL_MM = 40.0   # longer trips along the edge are left as jumps
+MAX_TRAVEL_MM = 150.0  # longer trips along the edge are left as jumps (each jump is a thread
+                       # to cut by hand on a machine without a cutter, like the PE540D)
 NONZERO, EVENODD = "nonzero", "evenodd"    # fill rules, as SVG names them
 KNOCKOUT_OVERLAP_MM = 0.4   # a cut-out fill still reaches this far under the shape on top
 
@@ -212,22 +215,6 @@ def _unrotate(paths, cs):
 
 
 # --------------------------------------------------------------------- travel
-def _nearest_on_ring(ring, p):
-    """(distance, position along the ring in mm, point) of the ring point nearest p."""
-    best = None
-    walked = 0.0
-    for a, b in zip(ring, ring[1:]):
-        dx, dy = b[0] - a[0], b[1] - a[1]
-        L2 = dx * dx + dy * dy
-        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2))
-        q = (a[0] + t * dx, a[1] + t * dy)
-        d = math.dist(p, q)
-        if best is None or d < best[0]:
-            best = (d, walked + t * math.sqrt(L2), q)
-        walked += math.sqrt(L2)
-    return best
-
-
 def _ring_between(ring, s0, s1):
     """Points along a closed ring from position s0 to s1 (mm), the shorter way round."""
     lengths = [math.dist(a, b) for a, b in zip(ring, ring[1:])]
@@ -250,38 +237,114 @@ def _ring_between(ring, s0, s1):
     return [p for _, p in pts]
 
 
+class _Edges:
+    """The rings travel can follow, and what's needed to measure trips along them."""
+
+    def __init__(self, rings, max_gap: float):
+        self.rings = [r for r in rings if len(r) >= 2]
+        self.max_gap = max_gap
+        self.boxes, self.lengths, self._segs = [], [], []
+        for r in self.rings:
+            pts = np.asarray(r, dtype=float)
+            start, step = pts[:-1], pts[1:] - pts[:-1]
+            L2 = (step * step).sum(axis=1)
+            along = np.concatenate(([0.0], np.cumsum(np.sqrt(L2))))
+            lo, hi = pts.min(axis=0) - max_gap, pts.max(axis=0) + max_gap
+            self.boxes.append((lo[0], lo[1], hi[0], hi[1]))
+            self.lengths.append(float(along[-1]))
+            self._segs.append((start, step, L2, along))
+
+    def _nearest(self, k, p):
+        """(distance, position along ring k in mm, point) of ring k's point nearest p."""
+        start, step, L2, along = self._segs[k]
+        rel = np.asarray(p, dtype=float) - start
+        t = np.where(L2 > 0, (rel * step).sum(axis=1) / np.where(L2 > 0, L2, 1.0), 0.0)
+        t = t.clip(0.0, 1.0)
+        off = rel - step * t[:, None]
+        dist = np.hypot(off[:, 0], off[:, 1])
+        i = int(dist.argmin())
+        q = start[i] + step[i] * t[i]
+        return (float(dist[i]), float(along[i] + t[i] * (along[i + 1] - along[i])),
+                (float(q[0]), float(q[1])))
+
+    def near(self, p) -> dict:
+        """{ring index: (gap, position along the ring, point)} for rings within max_gap of p."""
+        out = {}
+        for k, b in enumerate(self.boxes):
+            if b[0] <= p[0] <= b[2] and b[1] <= p[1] <= b[3]:
+                hit = self._nearest(k, p)
+                if hit[0] <= self.max_gap:
+                    out[k] = hit
+        return out
+
+    def trip(self, ea: dict, eb: dict):
+        """(length, ring, a's hit, b's hit) of the shortest trip along a ring that both
+        ends are near, the shorter way round; None if they share no ring."""
+        best = None
+        for k in ea.keys() & eb.keys():
+            (ga, sa, _), (gb, sb, _) = ea[k], eb[k]
+            total = self.lengths[k]
+            arc = abs(sb - sa) % total if total > 0 else 0.0
+            length = ga + min(arc, total - arc) + gb
+            if best is None or length < best[0]:
+                best = (length, k, ea[k], eb[k])
+        return best
+
+
 def travel_join(paths, rings, L: float = 2.5, max_gap: float = 1.0,
-                min_len: float = 0.4) -> list[list[Point]]:
-    """Join consecutive paths whose ends lie near the same ring with stitches
-    along that ring, instead of a jump. Paths that can't be joined stay separate.
+                min_len: float = 0.4, groups=None) -> list[list[Point]]:
+    """Order the paths and join them with stitches along a ring instead of jumps.
+
+    After each path, the next one sewn is the one whose end can be reached by the
+    shortest trip along a ring (a path may be sewn backwards). A jump is used only
+    when no remaining path can be reached that way: on a machine without a thread
+    cutter every jump is a thread to cut by hand. `groups` gives each path a number,
+    and lower groups are sewn first (a fill's underlay comes before its top rows).
     The travel is stitched like a run stitch (L apart, shorter on curves, never
-    under min_len), not point for point along the ring: an outline from a font or
-    a traced picture has a point every 0.2 mm or so."""
+    under min_len), not point for point along the ring: an outline from a font or a
+    traced picture has a point every 0.2 mm or so."""
     if not paths:
         return []
-    out = [list(paths[0])]
-    for nxt in paths[1:]:
-        a, b = out[-1][-1], nxt[0]
-        joined = False
-        for ring in rings:
-            ea, eb = _nearest_on_ring(ring, a), _nearest_on_ring(ring, b)
-            if ea[0] > max_gap or eb[0] > max_gap:
-                continue
-            route = [ea[2]] + _ring_between(ring, ea[1], eb[1]) + [eb[2]]
-            length = sum(math.dist(p, q) for p, q in zip([a] + route, route + [b]))
-            if length > MAX_TRAVEL_MM:
-                continue
-            way = [a]
-            for p in route + [b]:
-                if math.dist(way[-1], p) > 1e-6:
-                    way.append(p)
-            if len(way) > 1:
-                out[-1].extend(resample(way, L, TRAVEL_CORNER_DEG, min_len)[1:])
-            out[-1].extend(nxt[1:])
-            joined = True
-            break
-        if not joined:
-            out.append(list(nxt))
+    edges = _Edges(rings, max_gap)
+    groups = list(groups) if groups is not None else [0] * len(paths)
+    ends = [(edges.near(p[0]), edges.near(p[-1])) for p in paths]
+    out: list[list[Point]] = []
+    cur = here = here_e = None
+    for g in sorted(set(groups)):
+        todo = [i for i in range(len(paths)) if groups[i] == g]
+        while todo:
+            if here is None:                         # the very first path: as given
+                best = (True, 0.0, todo[0], False, None)
+            else:
+                best = None                          # (jumped, cost, index, backwards, trip)
+                for i in todo:
+                    for back in (False, True):
+                        t = edges.trip(here_e, ends[i][1] if back else ends[i][0])
+                        if t is not None and t[0] <= MAX_TRAVEL_MM:
+                            cand = (False, t[0], i, back, t)
+                        else:
+                            start = paths[i][-1] if back else paths[i][0]
+                            cand = (True, math.dist(here, start), i, back, None)
+                        if best is None or cand[:2] < best[:2]:
+                            best = cand
+            jumped, _, i, back, t = best
+            todo.remove(i)
+            pts = paths[i][::-1] if back else list(paths[i])
+            if jumped:
+                cur = pts
+                out.append(cur)
+            else:
+                _, k, ha, hb = t
+                route = [ha[2]] + _ring_between(edges.rings[k], ha[1], hb[1]) + [hb[2]]
+                way = [cur[-1]]
+                for q in route + [pts[0]]:
+                    if math.dist(way[-1], q) > 1e-6:
+                        way.append(q)
+                if len(way) > 1:
+                    cur.extend(resample(way, L, TRAVEL_CORNER_DEG, min_len)[1:])
+                cur.extend(pts[1:])
+            here = pts[-1]
+            here_e = ends[i][0] if back else ends[i][1]
     return out
 
 
@@ -307,10 +370,12 @@ def fill_paths(polylines, spec: FillSpec, min_len: float = 0.4,
         rows, cs = _rows(rings, cutouts, spec.angle + 90, max(2.0, spec.spacing * 5), inset=0.6,
                          rule=rule)
         paths += _unrotate(_serpentine(rows, min(3.0, spec.stitch_len), min_len, stagger=False), cs)
+    under = len(paths)
     rows, cs = _rows(rings, cutouts, spec.angle, spec.spacing, extend=spec.pull_comp, rule=rule)
     paths += _unrotate(_serpentine(rows, spec.stitch_len, min_len), cs)
     travel = rings if hidden else [inset_ring(r, rings, TRAVEL_INSET_MM, rule) for r in rings]
-    return travel_join(paths, travel, L=2.5, min_len=min_len)
+    groups = [0] * under + [1] * (len(paths) - under)
+    return travel_join(paths, travel, L=2.5, min_len=min_len, groups=groups)
 
 
 def _inside_fill(p, rings, rule: str = NONZERO) -> bool:

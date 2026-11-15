@@ -270,6 +270,36 @@ def test_travel_joins_fill_pieces_instead_of_jumping():
     assert max(math.dist(a, b) for a, b in zip(pts, pts[1:])) <= 3.9 + 1e-6
 
 
+@pytest.mark.parametrize("angle", [0, 45, 90])
+def test_a_winding_shape_fills_without_jumps(angle):
+    """A zigzag band (like a script letter's strokes) splits into many row pieces, made
+    top to bottom across the whole shape. Sewn in that order they needed a jump (a thread
+    to cut by hand on the PE540D) between most of them; sewn nearest-along-the-edge first,
+    the whole band is one run."""
+    from stitchwright.fill import FillSpec, fill_paths
+    from stitchwright.svg_import import Polyline
+    top = [(i * 15.0, 0.0 if i % 2 == 0 else 40.0) for i in range(5)]
+    band = Polyline(top + [(x, y + 6) for x, y in reversed(top)] + [top[0]], True)
+    for hidden in (True, False):
+        paths = fill_paths([band], FillSpec(angle=angle), hidden=hidden)
+        assert len(paths) == 1
+
+
+def test_travel_sews_the_nearest_reachable_piece_next():
+    from stitchwright.fill import travel_join
+    ring = [(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]       # 400 mm round
+    a = [(0, 10), (0, 20)]
+    far = [(100, 60), (100, 50)]         # 180 mm on round the edge: too far, so a jump
+    near = [(0, 40), (0, 30)]            # 10 mm on, but listed last and pointing away
+    out = travel_join([a, far, near], [ring], L=2.5)
+    assert len(out) == 2
+    assert out[0][:2] == a and out[0][-2:] == near[::-1]   # sewn backwards, from (0, 30)
+    assert out[1] == far[::-1]                             # jumped to its nearer end
+    # a lower group (a fill's underlay) is all sewn before a higher one
+    out = travel_join([near, a], [ring], groups=[1, 0])
+    assert len(out) == 1 and out[0][0] == a[0] and out[0][-1] in near
+
+
 def test_travel_is_stitched_like_a_run_not_copied_from_a_dense_outline():
     """A font's or a traced picture's outline has a point every 0.2 mm or so; travel
     along it must still be sewn with proper stitches, not one per outline point."""

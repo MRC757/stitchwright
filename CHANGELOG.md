@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6 (2026-11-14)
+
+- **Far fewer jumps in fills.** A winding fill (script lettering, a traced monogram) is cut
+  into many row pieces. They used to be sewn in the order they were made, top to bottom
+  across the whole shape, with a jump between most of them: on the PE540D, which has no
+  thread cutter, each jump is a thread to snip by hand. Now the nearest piece that can be
+  reached by stitching along the edge is sewn next, and travel along the edge can go up to
+  150 mm (was 40 mm). A script "MB" in Edwardian Script went from 64 jumps to 10, for about
+  7% more stitches. Planning is no slower. Sewn on the PE540D.
+
 ## 0.2.5 (2026-11-13)
 
 - **Font list with previews.** In Add text / Edit text, each font's name is shown in that
