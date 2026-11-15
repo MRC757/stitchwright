@@ -133,6 +133,28 @@ Ubuntu (Python 3.10, 3.12, 3.14): 174 tests, the only skips being Wingdings on L
 **Step C mostly done:** the Ubuntu test job is now required to pass. Still to do: nothing
 for C beyond keeping it green.
 
-**Not yet seen on a real screen** (needs WSL or an Ubuntu desktop): the window's look with
-`clam`, maximising, the mouse wheel, `.PES` files in the dialogs, scaling, anti-aliased
-text. Fix 9 (`.desktop` file) is part of step D.
+**Step D done (2026-11-15).** `./build_deb.sh` builds `dist/stitchwright_<version>_amd64.deb`
+(39 MB, 135 MB installed). CI job `build-deb` builds it on Ubuntu 22.04 on every push, installs
+it, runs `stitchwright --help` and `stitchwright convert`, opens the window on a virtual screen
+and uploads a screenshot. Job `deb-on-24-04` installs the same `.deb` on Ubuntu 24.04, tries it,
+and checks that `apt remove` removes it completely.
+
+- Package: `/opt/stitchwright` (PyInstaller folder build), `/usr/bin/stitchwright` (command
+  line; no command or just a file opens the window) and `/usr/bin/stitchwright-gui`, menu
+  entry, icons 32–256 px, MIME types for `.stitchwright` and `.pes` (dpkg triggers refresh
+  the menus, so there are no install scripts). Depends on X11, Xft, fontconfig; recommends
+  `fonts-liberation`.
+- `stitchwright.spec` builds the Windows one-file exe unchanged (checked locally) and the
+  Linux folder build from `packaging/linux/launcher.py`.
+- The bundled Tk has Xft: text is anti-aliased.
+- Found and fixed by the screenshots and smoke test: Pillow's `_tkinter_finder` wasn't
+  bundled, so every picture in the window failed; the sew-out buttons were blank (no media
+  symbols in DejaVu, now ⇤ ⇥ ❚❚ on Linux); Tk's DejaVu Sans is so wide that the sew-out row was
+  cut off (the window now uses Ubuntu, Noto Sans or Liberation Sans, and the slider shrinks
+  first).
+- Window class `Stitchwright` (matches `StartupWMClass` in the `.desktop` file).
+
+**Not yet seen on a real Ubuntu desktop:** maximising, the mouse wheel, `.PES` files in the
+dialogs, scaling, the dock icon, double-clicking a `.pes`. That's step F.
+
+Next: step E (release workflow publishes the `.deb` alongside the `.exe`).
