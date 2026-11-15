@@ -168,4 +168,12 @@ To release: give the CHANGELOG section a heading `## <version> (<date>)`, bump
 `stitchwright/__init__.py` and `version_info.txt`, merge to `main`, then tag `v<version>` and
 push the tag.
 
-Next: step F (real Ubuntu desktop check) and step G (README, CHANGELOG, release 0.3.0).
+**Step G docs done (2026-11-15).** README: Download and install for Windows and Ubuntu
+(fonts, big screens), building both apps, install from source on Ubuntu (venv or pipx), the
+USB stick on Ubuntu, log locations, Ubuntu troubleshooting, feature checklist, project layout,
+reference-file tests. CHANGELOG "Unreleased" has the Ubuntu entries. pyproject classifiers
+name Windows and Linux.
+
+Still to do: step F (real Ubuntu desktop check and a PE540D sew-out from a Linux-made PES),
+then the release: date the CHANGELOG heading as 0.3.0, bump the version, merge to `main`,
+tag `v0.3.0`.

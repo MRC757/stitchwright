@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Ubuntu version.** Stitchwright now runs on Ubuntu 22.04 and later. Download
+  `stitchwright_<version>_amd64.deb` from the release and double-click it, or install it with
+  `sudo apt install ./stitchwright_<version>_amd64.deb`. It adds Stitchwright to the app menu,
+  opens `.pes` and `.stitchwright` files on double-click, and adds the `stitchwright` command
+  line. The Windows app works as before, and both write exactly the same embroidery files (the
+  tests check this byte for byte on both systems).
+- **Fonts on Linux** are listed by their real names ("DejaVu Sans Bold", not the file name),
+  including every font in a font collection. A font that isn't installed is replaced by one
+  with the same letter widths (Arial ↔ Liberation Sans, Times New Roman ↔ Liberation Serif,
+  Courier New ↔ Liberation Mono, ...) or a close look-alike, in SVG text and in projects
+  opened on another computer, and the window says which font it used. This works both ways:
+  a project made on Linux opens in Arial on Windows.
+- A font chosen from a file (*Font file…* in the text dialog) is listed under its real name
+  instead of its file name; a file that isn't a font gets a message.
+- When the window is narrow, the sew-out slider shrinks first, before the options beside it.
+
 - **More stitch patterns.** Fills can now be sewn as **contour** (rings that follow the
   outline, spiralling inwards), **diamonds** or **waves** (rows whose needle drops line up into
   the pattern) or **criss-cross** (two layers of rows at right angles), as well as plain rows.

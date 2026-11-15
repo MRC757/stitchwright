@@ -74,23 +74,56 @@ Stitchwright was called *svg2pes* before version 0.2.1.
 - Checks that everything fits inside the hoop and its margin, and checks each saved file
   (PES or another machine's format) by reading it back.
 
-There is a desktop window (also as a single Windows `.exe`) and a command line. Both use the
-same conversion code. See [Future features](#future-features) for what's planned next.
+There is a desktop window and a command line, for **Windows** (a single `.exe`) and
+**Ubuntu Linux** (a `.deb` package). Both use the same conversion code, and both write exactly
+the same embroidery files. See [Future features](#future-features) for what's planned next.
 
-## Windows app (.exe)
+## Download and install
 
-`stitchwright.exe` is a single file that runs without Python installed. Double-click it, or drag
-a design onto it to open it straight away. The first launch takes a few seconds while it
-unpacks.
+Download from the [latest release](https://github.com/MRC757/stitchwright/releases/latest).
+Neither needs Python.
 
-To build it yourself, run this in PowerShell from the project folder (close the app first):
+### Windows
 
-    .\build_exe.ps1
+Download `stitchwright.exe`. It is a single file: double-click it, or drag a design onto it to
+open it straight away. The first launch takes a few seconds while it unpacks. Unsigned apps
+like this one sometimes trigger a Windows SmartScreen or antivirus warning. If so, choose
+*More info → Run anyway*.
 
-The script creates its own build environment (`.venv-build`), runs the tests, and writes
-`dist\stitchwright.exe`. If PowerShell blocks scripts, run
-`powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`. Unsigned PyInstaller apps sometimes
-trigger a Windows SmartScreen or antivirus warning. If so, choose *More info → Run anyway*.
+### Ubuntu (22.04 or later)
+
+Download `stitchwright_<version>_amd64.deb`, then double-click it to install it with the App
+Center, or run this in a terminal (this always works, whichever Ubuntu version you have):
+
+    sudo apt install ./Downloads/stitchwright_<version>_amd64.deb
+
+Stitchwright then appears in the app menu. Double-clicking a `.pes` or `.stitchwright` file
+opens it (for an SVG, right-click it and choose *Open With → Stitchwright*). The package also
+adds the command line, `stitchwright`. To remove it: `sudo apt remove stitchwright`.
+
+**Fonts:** Windows fonts such as Arial and Times New Roman aren't on Linux. Stitchwright uses a
+font with the same letter widths in their place (Liberation Sans for Arial, Liberation Serif
+for Times New Roman, and so on), so text from an SVG or from a project made on Windows keeps its
+size, and the window says which font it used. Projects made on Linux get Arial back when opened
+on Windows. To have the Microsoft fonts themselves:
+`sudo apt install ttf-mscorefonts-installer`.
+
+**Big screens:** if the window looks small on a high-resolution screen, start it with a scale,
+for example `STITCHWRIGHT_SCALE=1.5 stitchwright-gui`. It also follows `GDK_SCALE`.
+
+### Building the apps yourself
+
+- **Windows:** in PowerShell, from the project folder (close the app first):
+  `.\build_exe.ps1`. It creates its own build environment (`.venv-build`), runs the tests,
+  and writes `dist\stitchwright.exe`. If PowerShell blocks scripts, run
+  `powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`.
+- **Ubuntu:** `sudo apt install python3-venv python3-tk xvfb`, then from the project folder
+  `./build_deb.sh`. It needs Python 3.12 or later (Ubuntu 24.04 has it; on 22.04 give another
+  with `PYTHON=/path/to/python3.12 ./build_deb.sh`). It creates its own build environment
+  (`.venv-build-linux`), runs the tests, and writes `dist/stitchwright_<version>_amd64.deb`.
+
+Both builds use the exact library versions in `requirements.txt`, so every build of a release
+is the same.
 
 ## Install from source
 
@@ -103,12 +136,25 @@ macOS.
     stitchwright-gui                 # the window (or double-click stitchwright.pyw)
     stitchwright --help              # the command line
 
+On Ubuntu, install Tkinter first, and install Stitchwright in its own environment (Ubuntu's
+own Python doesn't let `pip` install into it):
+
+    sudo apt install python3-tk python3-venv fonts-liberation
+    git clone https://github.com/MRC757/stitchwright.git
+    cd stitchwright
+    python3 -m venv .venv
+    .venv/bin/pip install .
+    .venv/bin/stitchwright-gui
+
+or, without cloning: `sudo apt install pipx python3-tk`, then
+`pipx install git+https://github.com/MRC757/stitchwright.git`.
+
 For working on the code, install it editable with the test tools:
 `pip install -e ".[dev]"`; that gets the newest supported versions of the libraries it uses.
 Running from the folder without installing also works: `pip install -r requirements.txt`,
 then `python -m stitchwright gui`. `requirements.txt` holds the exact library versions the
-Windows app is built with, which need Python 3.12 or later; on Python 3.10 or 3.11, use
-`pip install -e .` instead.
+Windows and Ubuntu apps are built with, which need Python 3.12 or later; on Python 3.10 or
+3.11, use `pip install -e .` instead.
 
 ## Using the window
 
@@ -274,6 +320,12 @@ colour stop.
    made with version 0.2.0 (the sun in 214 Deep Gold, and shorter stitches on its curve).
 3. Sew a test on scrap fabric with stabiliser. If a file will not load, try PES version 6.
 
+**On Ubuntu:** the USB stick appears in Files, and in the save dialog under
+`/media/<your user name>/`. Save the PES there, then choose *Eject* (or *Safely Remove*) in
+Files before unplugging it, or the file may not be fully written. The PE540D reads FAT32
+sticks; to format one, use the *Disks* app (*Format Partition → For use with all systems
+and devices (FAT)*).
+
 **What has been checked on the machine so far:** a PES v1 file with run-stitch outlines
 (`samples/sample.pes`) loads and is read by the PE540D; filled script lettering (a TrueType
 font, fill with underlay and run-stitch outline, the 0.2.3 tie and travel stitches) sews
@@ -320,10 +372,19 @@ Sew a test piece before using them on a real project.
 
 ## If something goes wrong
 
-The window writes a log to `%LOCALAPPDATA%\stitchwright\stitchwright.log` (on macOS and Linux,
-`~/.stitchwright/stitchwright.log`): the files opened and saved, and the details of any unexpected
-error, which is also shown in a dialog. **Help → Open log folder** opens it; include the log
-when reporting a problem.
+The window writes a log of the files opened and saved, and the details of any unexpected
+error, which is also shown in a dialog. **Help → Open log folder** opens its folder; include the
+log when reporting a problem. It is in:
+
+- Windows: `%LOCALAPPDATA%\stitchwright\stitchwright.log`
+- Linux: `~/.local/state/stitchwright/stitchwright.log`
+- macOS: `~/.stitchwright/stitchwright.log`
+
+**Ubuntu: the window looks small, or its text is tiny.** Start it with a scale:
+`STITCHWRIGHT_SCALE=1.5 stitchwright-gui` (see [Ubuntu](#ubuntu-2204-or-later)).
+
+**Ubuntu: text is in a different font from the SVG or the project.** That font isn't installed.
+The window names the font it used instead; see *Fonts* under [Ubuntu](#ubuntu-2204-or-later).
 
 **Part of the design sews squashed into a line at one side.** The design reached past the
 machine's sewing area. Check the hoop setting on the Stitching tab is 4 × 4 in (100 × 100 mm)
@@ -382,14 +443,18 @@ Finished items are ticked.
       stabiliser together while sewing.
 
 ### Project and packaging
-- [x] **Automatic tests and builds:** GitHub Actions runs the tests on every push and builds
-      the `.exe` on version tags.
+- [x] **Automatic tests and builds:** GitHub Actions runs the tests on Windows and Ubuntu on
+      every push, builds the `.exe` and the `.deb` (and installs the `.deb` on Ubuntu 22.04 and
+      24.04 to try it), and publishes both on version tags.
 - [x] **Tests for editing** (arranging, groups, copy/paste, undo), through the `Document`
       model with no window.
 - [x] **Installable package:** `pip install .` gives `stitchwright` and `stitchwright-gui` commands.
 - [ ] **Tests for mouse interaction** in the window (dragging, handles, box selection).
 - [ ] **Installer and code signing** for the Windows app, so SmartScreen doesn't warn.
-- [ ] **macOS and Linux builds.**
+- [x] **Ubuntu build:** a `.deb` package with a menu entry and file types.
+- [ ] **Snap Store** package for Ubuntu, so it installs from the App Center and updates
+      itself.
+- [ ] **macOS build.**
 
 ## Project layout
 
@@ -415,8 +480,12 @@ Finished items are ticked.
 | `stitchwright/cli.py` | the command line |
 | `stitchwright/assets/` | app icon |
 | `pyproject.toml` | package metadata and dependencies |
-| `stitchwright.spec`, `build_exe.ps1`, `version_info.txt` | Windows .exe build |
-| `.github/workflows/ci.yml` | tests on every push, the `.exe` on version tags |
+| `stitchwright.spec` | PyInstaller build for both systems |
+| `build_exe.ps1`, `version_info.txt` | Windows .exe build |
+| `build_deb.sh`, `packaging/linux/` | Ubuntu .deb build: launcher, menu entry, file types, package description |
+| `packaging/release_notes.py` | the GitHub Release notes |
+| `.github/workflows/ci.yml` | tests on Windows and Ubuntu, both builds on every push, the release on version tags |
+| `tests/reference/` | embroidery files the output must match byte for byte on every system |
 | `CHANGELOG.md` | what changed in each version |
 
 ## Tests
@@ -425,7 +494,14 @@ Finished items are ticked.
     python -m pytest
 
 The tests include a pyflakes check (no unused imports or undefined names). A few open a
-small window, so run them in a desktop session.
+small window, so run them in a desktop session, or on Linux without a screen under
+`xvfb-run -a python -m pytest`.
+
+`tests/test_reference_output.py` checks that the PES and DST files for a few fixed designs are
+byte for byte the same as the ones in `tests/reference/`, on Windows and on Linux. When the
+stitching is changed on purpose, write new reference files with
+`STITCHWRIGHT_UPDATE_REFERENCE=1 python -m pytest tests/test_reference_output.py`, check the
+change in the preview, and commit them.
 
 ## Built with
 
