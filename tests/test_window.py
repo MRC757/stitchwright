@@ -127,7 +127,8 @@ def test_export_for_another_machine(app, tmp_path, monkeypatch):
         return str(tmp_path / "design")                 # typed without an extension
     monkeypatch.setattr(gui.filedialog, "asksaveasfilename", dialog)
     app.export_other()
-    assert [t[1] for t in asked["filetypes"]] == ["*.dst", "*.exp", "*.jef", "*.vp3", "*.xxx"]
+    assert [t[1].split()[0] for t in asked["filetypes"]] == ["*.dst", "*.exp", "*.jef", "*.vp3",
+                                                            "*.xxx"]      # (Linux: + "*.DST")
     assert pyembroidery.read_dst(str(tmp_path / "design.dst")).count_color_changes() == 4
     assert "don't store thread colours" in app.v_status.get()
     assert app._shortcuts["e"][0] == app.export_other
