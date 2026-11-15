@@ -64,6 +64,80 @@ jobs:
         if: always()
         run: xvfb-run -a python -m pytest -q -rfEs
 
+  build-deb:
+    # The Ubuntu package, built on the oldest supported Ubuntu (22.04) so it runs on newer
+    # ones too, then installed and tried: both commands, and a screenshot of the window.
+    needs: test-linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-liberation imagemagick desktop-file-utils
+      - name: Build the .deb
+        run: PYTHON=python ./build_deb.sh
+      - name: What the package bundles
+        run: |
+          dpkg-deb --info dist/*.deb
+          desktop-file-validate packaging/linux/stitchwright.desktop
+          ls dist/stitchwright/_internal | grep '\.so' || true
+          tk=$(find dist/stitchwright -name 'libtk*.so*' | head -1)
+          if [ -n "$tk" ]; then echo "bundled $tk"; else tk=$(ldconfig -p | awk '/libtk8/ {print $NF; exit}'); echo "system $tk"; fi
+          ldd "$tk" | grep -iE 'xft|fontconfig|freetype' || echo "WARNING: Tk without Xft (no anti-aliased text)"
+      - name: Install and try it
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          stitchwright --help
+          stitchwright convert samples/sample.svg -o "$RUNNER_TEMP/sample.pes"
+          ls -l "$RUNNER_TEMP/sample.pes"
+          xvfb-run -a -s "-screen 0 1440x900x24" bash -c '
+            stitchwright-gui samples/sample.svg & pid=$!
+            sleep 15
+            import -window root "$RUNNER_TEMP/window.png"
+            kill -0 $pid || { echo "the window closed by itself"; exit 1; }
+            kill $pid'
+          cat ~/.local/state/stitchwright/stitchwright.log
+          ! grep -q Traceback ~/.local/state/stitchwright/stitchwright.log
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stitchwright-deb
+          path: dist/*.deb
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: linux-screenshot-22.04
+          path: ${{ runner.temp }}/window.png
+
+  deb-on-24-04:
+    # the same .deb on the current Ubuntu
+    needs: build-deb
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: stitchwright-deb
+      - name: Install and try it
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb imagemagick ./stitchwright_*.deb
+          stitchwright convert samples/sample.svg -o "$RUNNER_TEMP/sample.pes"
+          xvfb-run -a -s "-screen 0 1440x900x24" bash -c '
+            stitchwright-gui samples/sample.svg & pid=$!
+            sleep 15
+            import -window root "$RUNNER_TEMP/window.png"
+            kill -0 $pid || { echo "the window closed by itself"; exit 1; }
+            kill $pid'
+          ! grep -q Traceback ~/.local/state/stitchwright/stitchwright.log
+          sudo apt-get remove -y stitchwright
+          test ! -e /opt/stitchwright && test ! -e /usr/bin/stitchwright-gui
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: linux-screenshot-24.04
+          path: ${{ runner.temp }}/window.png
+
   build-exe:
     # on version tags (v0.2.2, ...): build the Windows app and publish it as a GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- File types Stitchwright opens, so a double-click on them starts it.
+     Installed to /usr/share/mime/packages/stitchwright.xml by the .deb. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-stitchwright">
+    <comment>Stitchwright project</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="stitchwright"/>
+    <glob pattern="*.stitchwright"/>
+    <glob pattern="*.svg2pes"/>
+  </mime-type>
+  <mime-type type="application/x-pes-embroidery">
+    <comment>Brother PES embroidery design</comment>
+    <icon name="stitchwright"/>
+    <magic priority="50">
+      <match type="string" offset="0" value="#PES"/>
+    </magic>
+    <glob pattern="*.pes"/>
+  </mime-type>
+</mime-info>

@@ -1,0 +1,15 @@
+Package: stitchwright
+Version: @VERSION@
+Section: graphics
+Priority: optional
+Architecture: amd64
+Maintainer: MRC757 <MRC757@users.noreply.github.com>
+Installed-Size: @SIZE@
+Depends: libc6 (>= 2.35), libx11-6, libxft2, libxss1, libfontconfig1, fontconfig
+Recommends: fonts-liberation
+Homepage: https://github.com/MRC757/stitchwright
+Description: turn artwork into Brother PES embroidery files
+ Stitchwright converts SVG artwork, pictures and existing embroidery files into
+ Brother PES files (and DST, EXP, JEF, VP3 and XXX for other machines), with a
+ window for arranging the design, choosing threads, filling shapes, lettering
+ and previewing the stitches. Built for the Brother PE540D (4" x 4" hoop).

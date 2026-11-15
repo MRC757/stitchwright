@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Stitchwright
+GenericName=Embroidery Designer
+Comment=Turn artwork into Brother PES embroidery files
+Exec=stitchwright-gui %f
+Icon=stitchwright
+Terminal=false
+Categories=Graphics;VectorGraphics;
+Keywords=embroidery;PES;Brother;sewing;stitch;
+MimeType=application/x-stitchwright;application/x-pes-embroidery;image/svg+xml;
+StartupWMClass=Stitchwright

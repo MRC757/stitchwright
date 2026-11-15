@@ -1897,8 +1897,12 @@ def main(argv: list[str] | None = None) -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("stitchwright")  # own taskbar icon
         except (AttributeError, OSError):
             pass
-    root = tk.Tk()
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        root = tk.Tk()
+    else:
+        # the window class the desktop matches to stitchwright.desktop (StartupWMClass), so
+        # the dock shows the app's icon and name
+        root = tk.Tk(className="Stitchwright")
         setup_linux_look(root)
     assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
     try:
