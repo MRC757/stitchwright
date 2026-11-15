@@ -85,4 +85,26 @@ eject before unplugging). CHANGELOG, classifiers, release as 0.3.0.
 
 ## Step A findings
 
-(filled in as Step A runs)
+First run: GitHub Actions `ubuntu-latest` (Ubuntu 24.04), job `test-linux` in `ci.yml`,
+Python 3.10, 3.12 and 3.14, under xvfb (2026-11-15). WSL is not installed on the development
+PC yet, so the window itself has not been looked at.
+
+- **Everything except fonts already works.** pyflakes is clean; 152–153 of 155 tests pass,
+  including all the Tk window tests (`test_window.py`) and the conversion, fill, pattern and
+  project tests.
+- **1 failure, the expected one (fixes 1 and 2):** `test_text.py::test_svg_text_is_stitched_with_the_matching_font`.
+  SVG `font-family="Arial"` fell back to `DejaVuMathTeXGyre`, a maths font. Two causes,
+  both as predicted:
+  - fonts are listed by file name (`DejaVuSans`, `DejaVuSans-Bold`), so
+    `default_font()`'s list ("DejaVu Sans", "Liberation Sans") never matches;
+  - it then takes the first outline font alphabetically, which is the maths font.
+- **Skipped:** the Wingdings test (not installed: expected), and on Python 3.10 the lint
+  test that needs `tomllib` (3.11+; also skipped on Windows 3.10).
+- **Environment:** Tk 8.6.14, ttk themes `clam`, `alt`, `default`, `classic` (so `clam` is
+  available for fix 8); xvfb reports 100 dpi; 53 installed fonts found (DejaVu, Lato,
+  Liberation, ...).
+- **Still to check** (needs WSL or a real desktop): how the window looks, mouse wheel,
+  file dialogs with `.PES` files, high-DPI scaling, and whether the bundled Tk has Xft
+  (anti-aliased text).
+
+Next: step B, starting with fixes 1 and 2 (font names and fallbacks).
